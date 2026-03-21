@@ -4,8 +4,8 @@ import {
   UserCheck, Crown, RefreshCw, ChevronDown, Clock,
   CheckCircle, XCircle, AlertTriangle, X, Users
 } from 'lucide-react';
+import { API_BASE_URL as API } from '../services/api';
 
-const API = 'http://localhost:8000';
 const currentUserId = Number(localStorage.getItem('user_id')) || 1;
 
 const loanStatusConfig = {
@@ -378,3 +378,4 @@ const Members = () => {
 };
 
 export default Members;
+

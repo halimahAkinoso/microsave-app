@@ -4,8 +4,8 @@ import {
   Users, Wallet, TrendingUp, Clock, ArrowUpRight, ArrowDownLeft,
   CreditCard, BarChart3, Plus, RefreshCw, Shield
 } from 'lucide-react';
+import { API_BASE_URL as API } from '../services/api';
 
-const API = 'http://localhost:8000';
 
 const fmt = (n) => `₦${Number(n).toLocaleString()}`;
 
@@ -200,3 +200,4 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
+

@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timedelta
@@ -17,9 +19,16 @@ Base.metadata.create_all(bind=engine)
 # ── 2. App init ───────────────────────────────────────────────────────────────
 app = FastAPI(title="MicroSave API", version="1.0.0")
 
+cors_origins = os.getenv("CORS_ORIGINS")
+allowed_origins = (
+    [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
+    if cors_origins
+    else ["http://localhost:5173", "http://localhost:5174"]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

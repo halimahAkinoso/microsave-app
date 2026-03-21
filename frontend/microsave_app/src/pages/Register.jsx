@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, Mail, User, Phone, Briefcase, Loader2, Wallet } from 'lucide-react';
+import { API_BASE_URL } from '../services/api';
 
 const Register = () => {
   const [form, setForm] = useState({ name: '', email: '', password: '', phone: '', occupation: '' });
@@ -16,7 +17,7 @@ const Register = () => {
     setError('');
 
     try {
-      const response = await fetch('http://localhost:8000/register', {
+      const response = await fetch(`${API_BASE_URL}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
@@ -30,7 +31,7 @@ const Register = () => {
         formData.append('username', form.email);
         formData.append('password', form.password);
 
-        const loginRes = await fetch('http://localhost:8000/token', {
+        const loginRes = await fetch(`${API_BASE_URL}/token`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: formData,

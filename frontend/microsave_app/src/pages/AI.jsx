@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import DashboardLayout from '../components/DashboardLayout';
 import { Send, Bot, Sparkles, User } from 'lucide-react';
+import { API_BASE_URL as API } from '../services/api';
 
-const API = 'http://localhost:8000';
 
 const QUICK_PROMPTS = [
   "What is my loan balance?",
@@ -226,3 +226,4 @@ const AI = () => {
 };
 
 export default AI;
+

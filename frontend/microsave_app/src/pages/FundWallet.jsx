@@ -4,8 +4,8 @@ import {
   Wallet, CreditCard, CheckCircle, AlertTriangle,
   RefreshCw, Banknote, PiggyBank, ArrowRight, Zap
 } from 'lucide-react';
+import { API_BASE_URL as API } from '../services/api';
 
-const API = 'http://localhost:8000';
 const fmt = (n) => `₦${Number(n).toLocaleString()}`;
 
 const DEMO_CARDS = [
@@ -490,3 +490,4 @@ const FundWallet = () => {
 };
 
 export default FundWallet;
+

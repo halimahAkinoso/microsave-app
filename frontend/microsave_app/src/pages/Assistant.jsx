@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import DashboardLayout from '../components/DashboardLayout';
 import { Send, MessageSquare, Users, RefreshCw } from 'lucide-react';
+import { API_BASE_URL as API } from '../services/api';
 
-const API = 'http://localhost:8000';
 
 const Chat = () => {
   const [groups, setGroups] = useState([]);
@@ -236,3 +236,4 @@ const Chat = () => {
 };
 
 export default Chat;
+

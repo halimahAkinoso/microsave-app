@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import DashboardLayout from '../components/DashboardLayout';
 import { Users, Plus, CheckCircle, XCircle, Clock, Crown, RefreshCw, X, Shield, AlertTriangle } from 'lucide-react';
+import { API_BASE_URL as API } from '../services/api';
 
-const API = 'http://localhost:8000';
 const fmt = (n) => `₦${Number(n).toLocaleString()}`;
 const currentUserId = Number(localStorage.getItem('user_id')) || 1;
 
@@ -383,3 +383,4 @@ const Groups = () => {
 };
 
 export default Groups;
+
