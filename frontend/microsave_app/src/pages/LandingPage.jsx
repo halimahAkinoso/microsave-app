@@ -109,7 +109,7 @@ const LandingPage = () => {
               </div>
               <h3 className="text-xl font-black mb-4">Digital Ajo/Esusu</h3>
               <p className="text-slate-500 leading-relaxed font-medium">
-                Ditch the manual ledgers. Track every contribution in real-time with full transparency for all members.
+                Ditch the manual ledgers. Track every savings payment in real-time with full transparency for all members.
               </p>
             </div>
             <div className="bg-white p-10 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
@@ -209,7 +209,7 @@ const LandingPage = () => {
               {
                 step: '03', color: 'bg-purple-600', light: 'bg-purple-50', text: 'text-purple-700',
                 title: 'Save, borrow & grow',
-                desc: 'Make contributions, apply for group loans, and track everything in real time.',
+                desc: 'Make savings payments, apply for group loans, and track everything in real time.',
                 icon: TrendingUp,
               },
             ].map(({ step, color, light, text, title, desc, icon: Icon }) => (

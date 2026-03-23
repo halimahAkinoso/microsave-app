@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, Mail, User, Phone, Briefcase, Loader2, Wallet } from 'lucide-react';
 import { API_BASE_URL } from '../services/api';
+import { saveSession } from '../hooks/useAuth';
 
 const Register = () => {
   const [form, setForm] = useState({ name: '', email: '', password: '', phone: '', occupation: '' });
@@ -39,11 +40,9 @@ const Register = () => {
         const loginData = await loginRes.json();
 
         if (loginRes.ok) {
-          localStorage.setItem('token', loginData.access_token);
-          localStorage.setItem('user_id', loginData.user_id);
-          localStorage.setItem('user_name', loginData.name);
-          localStorage.setItem('user_email', loginData.email);
-          navigate('/dashboard');
+          saveSession(loginData.access_token, loginData.user);
+          const hasApprovedMembership = loginData.user?.membership?.join_status === 'approved';
+          navigate(hasApprovedMembership ? '/dashboard' : '/groups');
         } else {
           navigate('/login');
         }

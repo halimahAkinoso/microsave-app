@@ -1,43 +1,30 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Bot, Send, Sparkles, Users, UserPlus } from 'lucide-react';
+
 import DashboardLayout from '../components/DashboardLayout';
-import { Send, Bot, Sparkles, User } from 'lucide-react';
-import { API_BASE_URL as API } from '../services/api';
+import { getStoredSession } from '../hooks/useAuth';
+import { apiFetch } from '../services/api';
 
-
-const QUICK_PROMPTS = [
-  "What is my loan balance?",
-  "Show my contributions",
-  "What group am I in?",
-  "How do I fund my wallet?",
-  "Show my recent transactions",
-];
-
-// Render lightweight markdown: **bold** and newlines
-function renderMd(text) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={i}>{part.slice(2, -2)}</strong>;
-    }
-    return part.split('\n').map((line, j) => (
-      <React.Fragment key={`${i}-${j}`}>
-        {line}{j < part.split('\n').length - 1 && <br />}
-      </React.Fragment>
-    ));
-  });
-}
+const renderMarkdownLite = (text) =>
+  text.split('\n').map((line, index, lines) => (
+    <React.Fragment key={`${line}-${index}`}>
+      {line}
+      {index < lines.length - 1 && <br />}
+    </React.Fragment>
+  ));
 
 const TypingIndicator = () => (
-  <div className="flex justify-start mb-4">
-    <div className="flex items-end gap-2 max-w-xs">
-      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0 shadow-lg">
+  <div className="mb-4 flex justify-start">
+    <div className="flex max-w-xs items-end gap-2">
+      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg">
         <Bot size={14} className="text-white" />
       </div>
-      <div className="bg-white border border-slate-100 rounded-2xl rounded-bl-sm px-4 py-3 shadow-sm">
+      <div className="rounded-2xl rounded-bl-sm border border-slate-100 bg-white px-4 py-3 shadow-sm">
         <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-          <span className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-          <span className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-400" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-400" style={{ animationDelay: '150ms' }} />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-400" style={{ animationDelay: '300ms' }} />
         </div>
       </div>
     </div>
@@ -45,185 +32,285 @@ const TypingIndicator = () => (
 );
 
 const AI = () => {
+  const navigate = useNavigate();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [started, setStarted] = useState(false);
+  const [membership, setMembership] = useState(null);
+  const [pageLoading, setPageLoading] = useState(true);
   const bottomRef = useRef(null);
 
-  const currentUserId = Number(localStorage.getItem('user_id')) || 1;
-  const currentUserName = localStorage.getItem('user_name') || 'User';
-  const initials = currentUserName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+  const session = getStoredSession();
+  const currentUserName = session?.user?.name || 'User';
+  const initials = currentUserName
+    .split(' ')
+    .map((token) => token[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+
+  const membershipApproved = membership?.join_status === 'approved';
+  const isAdmin = membershipApproved && membership?.role === 'admin';
+
+  const quickPrompts = useMemo(() => {
+    if (!membershipApproved) {
+      return [];
+    }
+
+    if (isAdmin) {
+      return [
+        'Give me an overview of the group.',
+        'How many membership requests are pending?',
+        'How many loan requests are pending?',
+        'Who currently has active loans?',
+        'What is our group balance?',
+      ];
+    }
+
+    return [
+      'How much do I still owe?',
+      'Can I afford a loan?',
+      'What group am I in?',
+      'What is my wallet balance?',
+      'Show my recent transactions',
+    ];
+  }, [isAdmin, membershipApproved]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
+  useEffect(() => {
+    const loadMembership = async () => {
+      setPageLoading(true);
+      try {
+        const membershipResponse = await apiFetch('/groups/my-membership');
+        setMembership(membershipResponse.membership);
+      } finally {
+        setPageLoading(false);
+      }
+    };
+
+    loadMembership();
+  }, []);
+
   const sendMessage = async (text) => {
-    const userMsg = text || input.trim();
-    if (!userMsg) return;
+    if (!membershipApproved) {
+      return;
+    }
+
+    const content = text || input.trim();
+    if (!content) return;
+
     setInput('');
     setStarted(true);
-
-    setMessages(prev => [...prev, { role: 'user', content: userMsg, ts: new Date() }]);
+    setMessages((current) => [...current, { role: 'user', content, ts: new Date() }]);
     setLoading(true);
 
     try {
-      const res = await fetch(`${API}/assistant/chat`, {
+      const response = await apiFetch('/assistant/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: currentUserId, message: userMsg }),
+        body: JSON.stringify({ message: content }),
       });
-      const data = await res.json();
-      setMessages(prev => [...prev, { role: 'bot', content: data.response, ts: new Date() }]);
+      setMessages((current) => [...current, { role: 'bot', content: response.response, ts: new Date() }]);
     } catch {
-      setMessages(prev => [...prev, {
-        role: 'bot',
-        content: "Sorry, I couldn't connect to the server. Please make sure the backend is running.",
-        ts: new Date(),
-      }]);
+      setMessages((current) => [
+        ...current,
+        {
+          role: 'bot',
+          content: 'I could not reach the assistant service right now. Check that the backend is running and your session is valid.',
+          ts: new Date(),
+        },
+      ]);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    sendMessage();
-  };
+  const formatTime = (date) => date.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' });
 
-  const fmt = (d) => d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' });
+  const renderBlockedState = () => {
+    const pending = membership?.join_status === 'pending';
+
+    return (
+      <div className="flex flex-1 items-center justify-center px-4 py-10">
+        <div className="w-full max-w-2xl rounded-3xl border border-slate-100 bg-white p-8 text-center shadow-sm">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-amber-400 to-orange-500 shadow-xl shadow-orange-500/20">
+            {pending ? <Users size={34} className="text-white" /> : <UserPlus size={34} className="text-white" />}
+          </div>
+          <h2 className="mt-6 text-2xl font-black text-slate-900">
+            {pending ? 'Waiting for group approval' : 'Join a group to use the assistant'}
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-slate-500">
+            {pending
+              ? 'This assistant is scoped to approved membership data. Once your admin approves the request, you can ask about savings, loans, repayments, approvals, and group balance.'
+              : 'The assistant only works against an approved group membership. Join a group first so it can answer using your savings, loan, and repayment records.'}
+          </p>
+          <button
+            onClick={() => navigate('/groups')}
+            className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800"
+          >
+            <Users size={16} />
+            Open groups
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col h-[calc(100vh-0px)] overflow-hidden bg-slate-50">
-
-        {/* Header */}
-        <div className="bg-white border-b border-slate-100 px-6 py-4 flex items-center gap-4 flex-shrink-0 shadow-sm">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-500/25">
+      <div className="flex h-[calc(100vh-0px)] flex-col overflow-hidden bg-slate-50">
+        <div className="flex flex-shrink-0 items-center gap-4 border-b border-slate-100 bg-white px-6 py-4 shadow-sm">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg shadow-emerald-500/25">
             <Bot size={22} className="text-white" />
           </div>
           <div>
-            <h1 className="font-black text-slate-900 text-lg">MicroSave AI Assistant</h1>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-              <p className="text-xs text-slate-400 font-medium">Online • Knows your personal data</p>
+            <h1 className="text-lg font-black text-slate-900">MicroSave Assistant</h1>
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+              <p className="text-xs font-medium text-slate-400">
+                {membershipApproved
+                  ? `${membership?.group_name} | ${isAdmin ? 'Admin' : 'Member'} context`
+                  : 'Approval required'}
+              </p>
             </div>
           </div>
-          <div className="ml-auto">
-            <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-full border border-emerald-100 flex items-center gap-1">
-              <Sparkles size={11} /> Smart AI
+          <div className="ml-auto flex items-center gap-2">
+            {membershipApproved && (
+              <span className="rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
+                {membership?.group_name}
+              </span>
+            )}
+            <span className="flex items-center gap-1 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
+              <Sparkles size={11} />
+              Smart AI
             </span>
           </div>
         </div>
 
-        {/* Messages area */}
-        <div className="flex-1 overflow-y-auto px-4 py-6 space-y-2">
+        {pageLoading ? (
+          <div className="flex flex-1 items-center justify-center">
+            <div className="h-10 w-10 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
+          </div>
+        ) : !membershipApproved ? (
+          renderBlockedState()
+        ) : (
+          <>
+            <div className="flex-1 space-y-2 overflow-y-auto px-4 py-6">
+              {!started && (
+                <div className="flex h-full flex-col items-center justify-center px-6 pb-8 text-center">
+                  <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-emerald-400 to-teal-500 shadow-2xl shadow-emerald-500/30">
+                    <Bot size={36} className="text-white" />
+                  </div>
+                  <h2 className="mb-2 text-2xl font-black text-slate-900">Hello, {currentUserName.split(' ')[0]}</h2>
+                  <p className="mb-3 max-w-sm font-medium leading-relaxed text-slate-500">
+                    {isAdmin
+                      ? 'Ask for approval workload, active loans, group balance, or an admin overview.'
+                      : 'Ask about loan eligibility, outstanding debt, savings, wallet balance, or recent activity.'}
+                  </p>
+                  <p className="mb-8 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
+                    {membership.group_name} | {isAdmin ? 'Admin' : 'Member'}
+                  </p>
+                  <div className="flex max-w-2xl flex-wrap justify-center gap-2">
+                    {quickPrompts.map((prompt) => (
+                      <button
+                        key={prompt}
+                        onClick={() => sendMessage(prompt)}
+                        className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-          {/* Welcome state */}
-          {!started && (
-            <div className="flex flex-col items-center justify-center h-full text-center px-6 pb-8">
-              <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-2xl shadow-emerald-500/30 mb-6">
-                <Bot size={36} className="text-white" />
-              </div>
-              <h2 className="text-2xl font-black text-slate-900 mb-2">Hello, {currentUserName.split(' ')[0]}! 👋</h2>
-              <p className="text-slate-500 font-medium mb-8 max-w-sm leading-relaxed">
-                I'm your personal finance assistant. I know your loans, savings, and group data. Ask me anything!
-              </p>
-              <div className="flex flex-wrap gap-2 justify-center max-w-lg">
-                {QUICK_PROMPTS.map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => sendMessage(p)}
-                    className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:border-emerald-400 hover:text-emerald-700 hover:bg-emerald-50 transition-all shadow-sm"
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
+              {messages.map((message, index) =>
+                message.role === 'user' ? (
+                  <div key={index} className="mb-4 flex justify-end">
+                    <div className="flex max-w-xs items-end gap-2 lg:max-w-md">
+                      <div className="flex flex-col items-end">
+                        <div className="rounded-2xl rounded-br-sm bg-emerald-500 px-4 py-2.5 text-white shadow-lg shadow-emerald-500/20">
+                          <p className="text-sm leading-relaxed">{message.content}</p>
+                        </div>
+                        <p className="mr-1 mt-1 text-[10px] text-slate-400">{formatTime(message.ts)}</p>
+                      </div>
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-slate-600 to-slate-800 text-xs font-black text-white shadow">
+                        {initials}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div key={index} className="mb-4 flex justify-start">
+                    <div className="flex max-w-xs items-end gap-2 lg:max-w-xl">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg">
+                        <Bot size={14} className="text-white" />
+                      </div>
+                      <div className="flex flex-col">
+                        <div className="rounded-2xl rounded-bl-sm border border-slate-100 bg-white px-4 py-3 shadow-sm">
+                          <p className="text-sm leading-relaxed text-slate-800">{renderMarkdownLite(message.content)}</p>
+                        </div>
+                        <p className="ml-1 mt-1 text-[10px] text-slate-400">{formatTime(message.ts)}</p>
+                      </div>
+                    </div>
+                  </div>
+                )
+              )}
+
+              {loading && <TypingIndicator />}
+              <div ref={bottomRef} />
             </div>
-          )}
 
-          {/* Chat messages */}
-          {messages.map((msg, i) => (
-            msg.role === 'user' ? (
-              <div key={i} className="flex justify-end mb-4">
-                <div className="flex items-end gap-2 max-w-xs lg:max-w-md">
-                  <div className="flex flex-col items-end">
-                    <div className="bg-emerald-500 text-white px-4 py-2.5 rounded-2xl rounded-br-sm shadow-lg shadow-emerald-500/20">
-                      <p className="text-sm leading-relaxed">{msg.content}</p>
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-1 mr-1">{fmt(msg.ts)}</p>
-                  </div>
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-slate-600 to-slate-800 flex items-center justify-center flex-shrink-0 text-white text-xs font-black shadow">
-                    {initials}
-                  </div>
+            <div className="flex-shrink-0 border-t border-slate-100 bg-white px-4 py-4 shadow-lg">
+              {started && messages.length > 0 && messages.length < 4 && (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {quickPrompts.slice(0, 3).map((prompt) => (
+                    <button
+                      key={prompt}
+                      onClick={() => sendMessage(prompt)}
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
                 </div>
-              </div>
-            ) : (
-              <div key={i} className="flex justify-start mb-4">
-                <div className="flex items-end gap-2 max-w-xs lg:max-w-lg xl:max-w-2xl">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0 shadow-lg">
-                    <Bot size={14} className="text-white" />
-                  </div>
-                  <div className="flex flex-col">
-                    <div className="bg-white border border-slate-100 rounded-2xl rounded-bl-sm px-4 py-3 shadow-sm">
-                      <p className="text-sm text-slate-800 leading-relaxed">{renderMd(msg.content)}</p>
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-1 ml-1">{fmt(msg.ts)}</p>
-                  </div>
+              )}
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  sendMessage();
+                }}
+                className="flex items-center gap-3"
+              >
+                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-600 to-slate-800 text-xs font-black text-white shadow">
+                  {initials}
                 </div>
-              </div>
-            )
-          ))}
-
-          {loading && <TypingIndicator />}
-          <div ref={bottomRef} />
-        </div>
-
-        {/* Input bar */}
-        <div className="bg-white border-t border-slate-100 px-4 py-4 flex-shrink-0 shadow-lg">
-          {/* Quick prompts after chat started */}
-          {started && messages.length > 0 && messages.length < 4 && (
-            <div className="flex flex-wrap gap-2 mb-3">
-              {QUICK_PROMPTS.slice(0, 3).map((p) => (
+                <div className="flex flex-1 items-center gap-2 rounded-2xl bg-slate-100 px-4 py-2.5 transition focus-within:bg-white focus-within:ring-2 focus-within:ring-emerald-400">
+                  <input
+                    type="text"
+                    value={input}
+                    onChange={(event) => setInput(event.target.value)}
+                    placeholder={isAdmin ? 'Ask about approvals, group balance, or active loans...' : 'Ask about your wallet, savings, or loans...'}
+                    className="flex-1 bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
+                    disabled={loading}
+                  />
+                </div>
                 <button
-                  key={p}
-                  onClick={() => sendMessage(p)}
-                  className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 hover:bg-emerald-50 transition-all"
+                  type="submit"
+                  disabled={!input.trim() || loading}
+                  className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600 disabled:opacity-40"
                 >
-                  {p}
+                  <Send size={16} />
                 </button>
-              ))}
+              </form>
             </div>
-          )}
-          <form onSubmit={handleSubmit} className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-slate-600 to-slate-800 flex items-center justify-center text-white text-xs font-black flex-shrink-0 shadow">
-              {initials}
-            </div>
-            <div className="flex-1 flex items-center gap-2 bg-slate-100 rounded-2xl px-4 py-2.5 focus-within:bg-white focus-within:ring-2 focus-within:ring-emerald-400 transition-all">
-              <input
-                type="text"
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                placeholder="Ask me about your loans, savings, groups…"
-                className="flex-1 bg-transparent outline-none text-sm text-slate-800 placeholder-slate-400"
-                disabled={loading}
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={!input.trim() || loading}
-              className="w-10 h-10 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white rounded-2xl flex items-center justify-center transition-all shadow-lg shadow-emerald-500/25 flex-shrink-0"
-            >
-              <Send size={16} />
-            </button>
-          </form>
-        </div>
+          </>
+        )}
       </div>
     </DashboardLayout>
   );
 };
 
 export default AI;
-

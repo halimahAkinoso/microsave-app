@@ -1,10 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from sqlalchemy.orm import Session
+
 from app.database import get_db
 from app.models.user import User
+from app.services.auth_service import (
+    authenticate_user,
+    create_access_token,
+    get_current_user,
+    hash_password,
+    serialize_user_profile,
+)
 
 router = APIRouter(tags=["auth"])
 
@@ -13,8 +20,8 @@ class UserRegister(BaseModel):
     name: str
     email: EmailStr
     password: str
-    phone: Optional[str] = None
-    occupation: Optional[str] = None
+    phone: str | None = None
+    occupation: str | None = None
 
 
 @router.post("/register")
@@ -26,41 +33,51 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
     new_user = User(
         name=user_data.name,
         email=user_data.email,
-        password=user_data.password,
+        password=hash_password(user_data.password),
         phone=user_data.phone,
         occupation=user_data.occupation,
     )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
     return {
         "message": "User created successfully",
-        "user_id": new_user.id,
-        "name": new_user.name,
-        "email": new_user.email,
+        "user": serialize_user_profile(db, new_user),
     }
 
 
 @router.post("/token")
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == form_data.username).first()
-    if not user or user.password != form_data.password:
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
+    user = authenticate_user(db, form_data.username, form_data.password)
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
         )
+
     return {
-        "access_token": f"token_for_{user.email}",
+        "access_token": create_access_token(user.email),
         "token_type": "bearer",
-        "user_id": user.id,
-        "name": user.name,
-        "email": user.email,
+        "user": serialize_user_profile(db, user),
     }
 
 
+@router.get("/auth/me")
+def get_me(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return serialize_user_profile(db, current_user)
+
+
 @router.get("/user/profile")
-def get_profile(user_id: int, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == user_id).first()
-    if user:
-        return {"id": user.id, "name": user.name, "email": user.email, "phone": user.phone, "occupation": user.occupation}
-    return {"name": "User"}
+def get_profile(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return serialize_user_profile(db, current_user)
+

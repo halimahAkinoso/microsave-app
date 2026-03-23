@@ -9,7 +9,7 @@ class Group(Base):
     name = Column(String, nullable=False)
     description = Column(String)
     balance = Column(Float, default=0.0)
-    contribution_amount = Column(Float, default=0.0)
-    contribution_period = Column(String, default="monthly")  # weekly / monthly
+    savings_amount = Column(Float, default=0.0)
+    savings_period = Column(String, default="monthly")  # weekly / monthly
     admin_id = Column(Integer, nullable=True)  # FK to users (group head)
     created_at = Column(DateTime, default=func.now())

@@ -1,227 +1,381 @@
-import React, { useState, useEffect, useRef } from 'react';
-import DashboardLayout from '../components/DashboardLayout';
-import { Send, MessageSquare, Users, RefreshCw } from 'lucide-react';
-import { API_BASE_URL as API } from '../services/api';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { MessageSquare, RefreshCw, Send, Users } from 'lucide-react';
 
+import DashboardLayout from '../components/DashboardLayout';
+import { getStoredSession } from '../hooks/useAuth';
+import { apiFetch } from '../services/api';
 
 const Chat = () => {
-  const [groups, setGroups] = useState([]);
-  const [selectedGroup, setSelectedGroup] = useState(null);
+  const session = getStoredSession();
+  const currentUserId = session?.user?.id;
+  const currentUserName = session?.user?.name || 'User';
+
+  const [membership, setMembership] = useState(null);
+  const [group, setGroup] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
+  const [loadingMembership, setLoadingMembership] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const messagesEndRef = useRef(null);
+  const [error, setError] = useState('');
+  const bottomRef = useRef(null);
   const pollRef = useRef(null);
 
-  const currentUserId = Number(localStorage.getItem('user_id')) || 1;
-  const currentUserName = localStorage.getItem('user_name') || 'User';
+  const isApprovedMember = membership?.join_status === 'approved' && group;
+  const initials = useMemo(
+    () =>
+      currentUserName
+        .split(' ')
+        .map((part) => part[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2),
+    [currentUserName]
+  );
 
-  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = () => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
-  // Load groups this user is part of
+  const loadMessages = async (groupId) => {
+    setLoadingMessages(true);
+    setError('');
+    try {
+      const data = await apiFetch(`/chat/${groupId}/messages`);
+      setMessages(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(err.message || 'Could not load group messages.');
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
+
   useEffect(() => {
-    fetch(`${API}/groups`)
-      .then(r => r.json())
-      .then(data => {
-        setGroups(data);
-        if (data.length > 0) setSelectedGroup(data[0]);
-      });
+    let active = true;
+
+    const loadMembership = async () => {
+      setLoadingMembership(true);
+      setError('');
+      try {
+        const data = await apiFetch('/groups/my-membership');
+        if (!active) {
+          return;
+        }
+        setMembership(data.membership || null);
+        setGroup(data.group || null);
+      } catch (err) {
+        if (active) {
+          setError(err.message || 'Could not load your group membership.');
+        }
+      } finally {
+        if (active) {
+          setLoadingMembership(false);
+        }
+      }
+    };
+
+    loadMembership();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  // Load messages & poll every 3s
-  const loadMessages = async (groupId) => {
-    try {
-      const data = await fetch(`${API}/chat/${groupId}/messages`).then(r => r.json());
-      setMessages(data);
-    } catch (e) {}
-  };
+  useEffect(() => {
+    if (!isApprovedMember) {
+      setMessages([]);
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+      }
+      return undefined;
+    }
+
+    loadMessages(group.id);
+    pollRef.current = setInterval(() => {
+      loadMessages(group.id);
+    }, 4000);
+
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+      }
+    };
+  }, [group?.id, isApprovedMember]);
 
   useEffect(() => {
-    if (!selectedGroup) return;
-    setLoading(true);
-    loadMessages(selectedGroup.id).finally(() => setLoading(false));
+    scrollToBottom();
+  }, [messages, loadingMessages]);
 
-    // Poll every 3 seconds
-    pollRef.current = setInterval(() => loadMessages(selectedGroup.id), 3000);
-    return () => clearInterval(pollRef.current);
-  }, [selectedGroup]);
+  const sendMessage = async (event) => {
+    event.preventDefault();
+    if (!isApprovedMember || !input.trim()) {
+      return;
+    }
 
-  useEffect(() => scrollToBottom(), [messages]);
-
-  const sendMessage = async (e) => {
-    e.preventDefault();
-    if (!input.trim() || !selectedGroup) return;
-    setSending(true);
     const content = input.trim();
     setInput('');
+    setSending(true);
+    setError('');
+
     try {
-      const res = await fetch(`${API}/chat/${selectedGroup.id}/messages`, {
+      const newMessage = await apiFetch(`/chat/${group.id}/messages`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sender_id: currentUserId, content }),
+        body: JSON.stringify({ content }),
       });
-      const newMsg = await res.json();
-      setMessages(prev => [...prev, newMsg]);
-    } finally { setSending(false); }
+      setMessages((current) => [...current, newMessage]);
+    } catch (err) {
+      setError(err.message || 'Could not send your message.');
+      setInput(content);
+    } finally {
+      setSending(false);
+    }
   };
 
-  const formatTime = (iso) => {
-    if (!iso) return '';
-    return new Date(iso).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' });
+  const formatTime = (isoString) => {
+    if (!isoString) {
+      return '';
+    }
+    return new Date(isoString).toLocaleTimeString('en-NG', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   };
 
-  const formatDate = (iso) => {
-    if (!iso) return '';
-    const d = new Date(iso);
+  const formatDate = (isoString) => {
+    if (!isoString) {
+      return '';
+    }
+
+    const date = new Date(isoString);
     const today = new Date();
-    const diff = Math.floor((today - d) / 86400000);
-    if (diff === 0) return 'Today';
-    if (diff === 1) return 'Yesterday';
-    return d.toLocaleDateString('en-NG', { day: '2-digit', month: 'short' });
+    const midnightToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const midnightDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const diffDays = Math.round((midnightToday - midnightDate) / 86400000);
+
+    if (diffDays === 0) {
+      return 'Today';
+    }
+    if (diffDays === 1) {
+      return 'Yesterday';
+    }
+
+    return date.toLocaleDateString('en-NG', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
   };
 
-  // Group messages by date
-  const messagesByDate = messages.reduce((acc, m) => {
-    const dateKey = formatDate(m.created_at);
-    if (!acc[dateKey]) acc[dateKey] = [];
-    acc[dateKey].push(m);
-    return acc;
+  const groupedMessages = messages.reduce((accumulator, message) => {
+    const dateKey = formatDate(message.created_at);
+    if (!accumulator[dateKey]) {
+      accumulator[dateKey] = [];
+    }
+    accumulator[dateKey].push(message);
+    return accumulator;
   }, {});
+
+  const renderEmptyState = () => {
+    if (loadingMembership) {
+      return (
+        <div className="flex flex-1 items-center justify-center text-slate-400">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
+        </div>
+      );
+    }
+
+    if (membership?.join_status === 'pending') {
+      return (
+        <div className="flex flex-1 items-center justify-center px-6 text-center text-slate-500">
+          <div>
+            <MessageSquare size={42} className="mx-auto mb-4 opacity-30" />
+            <h2 className="text-lg font-black text-slate-900">Chat unlocks after approval</h2>
+            <p className="mt-2 max-w-md text-sm leading-relaxed">
+              Your request to join {membership.group_name || 'this group'} is still pending. The admin
+              must approve your membership before you can access the community chat.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 text-center text-slate-500">
+        <div>
+          <MessageSquare size={42} className="mx-auto mb-4 opacity-30" />
+          <h2 className="text-lg font-black text-slate-900">No active group chat</h2>
+          <p className="mt-2 max-w-md text-sm leading-relaxed">
+            Join or create a group first. Chat is available only to approved members of a group.
+          </p>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <DashboardLayout>
-      <div className="flex h-[calc(100vh-0px)] overflow-hidden">
-
-        {/* Group List Sidebar */}
-        <div className="w-72 bg-white border-r border-slate-100 flex flex-col flex-shrink-0">
-          <div className="px-5 py-5 border-b border-slate-100">
-            <h2 className="text-lg font-black text-slate-900">Group Chats</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Select a group to view messages</p>
+      <div className="flex h-[calc(100vh-0px)] overflow-hidden bg-slate-50">
+        <aside className="hidden w-80 flex-shrink-0 border-r border-slate-100 bg-white lg:flex lg:flex-col">
+          <div className="border-b border-slate-100 px-5 py-5">
+            <h2 className="text-lg font-black text-slate-900">Community Chat</h2>
+            <p className="mt-1 text-xs text-slate-400">Your current group messaging space</p>
           </div>
-          <div className="flex-1 overflow-y-auto py-2">
-            {groups.length === 0 && (
-              <p className="text-xs text-slate-400 text-center py-8">No groups available.</p>
-            )}
-            {groups.map(g => {
-              const isSelected = selectedGroup?.id === g.id;
-              return (
-                <button key={g.id} onClick={() => setSelectedGroup(g)}
-                  className={`w-full flex items-center gap-3 px-5 py-3.5 transition-all text-left ${
-                    isSelected ? 'bg-emerald-50 border-r-4 border-emerald-500' : 'hover:bg-slate-50'
-                  }`}>
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-black flex-shrink-0 ${
-                    isSelected ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-700'
-                  }`}>
-                    {g.name.charAt(0)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-bold truncate ${isSelected ? 'text-emerald-700' : 'text-slate-800'}`}>{g.name}</p>
-                    <p className="text-xs text-slate-400 truncate">{g.member_count} members</p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
 
-        {/* Chat Area */}
-        <div className="flex-1 flex flex-col min-w-0">
-          {!selectedGroup ? (
-            <div className="flex-1 flex items-center justify-center text-slate-400">
-              <div className="text-center">
-                <MessageSquare size={48} className="mx-auto mb-3 opacity-20" />
-                <p className="font-semibold">Select a group to start chatting</p>
+          <div className="flex-1 px-5 py-5">
+            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Membership</p>
+              <h3 className="mt-3 text-xl font-black text-slate-900">
+                {group?.name || membership?.group_name || 'No active group'}
+              </h3>
+              <p className="mt-2 text-sm leading-relaxed text-slate-500">
+                {group?.description ||
+                  (membership?.join_status === 'pending'
+                    ? 'Waiting for admin approval before chat access is enabled.'
+                    : 'You need an approved membership before messages are available.')}
+              </p>
+
+              <div className="mt-5 space-y-3 text-sm text-slate-600">
+                <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                  <span>Status</span>
+                  <span className="font-bold capitalize text-slate-900">
+                    {membership?.join_status || 'none'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                  <span>Role</span>
+                  <span className="font-bold capitalize text-slate-900">
+                    {membership?.role || 'member'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
+                  <span>Members</span>
+                  <span className="font-bold text-slate-900">{group?.member_count ?? 0}</span>
+                </div>
               </div>
             </div>
+          </div>
+        </aside>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          {!isApprovedMember ? (
+            renderEmptyState()
           ) : (
             <>
-              {/* Chat Header */}
-              <div className="px-6 py-4 bg-white border-b border-slate-100 flex items-center justify-between flex-shrink-0">
+              <div className="flex flex-shrink-0 items-center justify-between border-b border-slate-100 bg-white px-6 py-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center text-white font-black">
-                    {selectedGroup.name.charAt(0)}
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500 text-lg font-black text-white">
+                    {group.name.charAt(0)}
                   </div>
                   <div>
-                    <h3 className="font-black text-slate-900">{selectedGroup.name}</h3>
-                    <div className="flex items-center gap-1">
-                      <Users size={11} className="text-slate-400" />
-                      <p className="text-xs text-slate-400">{selectedGroup.member_count} members • Admin: {selectedGroup.admin_name}</p>
+                    <h1 className="text-lg font-black text-slate-900">{group.name}</h1>
+                    <div className="flex items-center gap-2 text-xs text-slate-400">
+                      <Users size={12} />
+                      <span>
+                        {group.member_count} members
+                        {group.admin_name ? ` | Admin: ${group.admin_name}` : ''}
+                      </span>
                     </div>
                   </div>
                 </div>
-                <button onClick={() => loadMessages(selectedGroup.id)} className="p-2 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 rounded-xl transition-all">
+
+                <button
+                  type="button"
+                  onClick={() => loadMessages(group.id)}
+                  className="rounded-2xl p-2 text-slate-400 transition hover:bg-emerald-50 hover:text-emerald-600"
+                >
                   <RefreshCw size={16} />
                 </button>
               </div>
 
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4 bg-slate-50">
-                {loading && (
-                  <div className="flex justify-center">
-                    <div className="w-6 h-6 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+              {error ? (
+                <div className="border-b border-rose-100 bg-rose-50 px-6 py-3 text-sm font-medium text-rose-700">
+                  {error}
+                </div>
+              ) : null}
+
+              <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+                {loadingMessages ? (
+                  <div className="flex justify-center py-12">
+                    <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
                   </div>
-                )}
-                {Object.entries(messagesByDate).map(([date, dayMessages]) => (
-                  <div key={date}>
-                    {/* Date divider */}
-                    <div className="flex items-center gap-3 my-4">
-                      <div className="flex-1 h-px bg-slate-200" />
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 px-2">{date}</span>
-                      <div className="flex-1 h-px bg-slate-200" />
-                    </div>
-                    {dayMessages.map(msg => {
-                      const isMe = msg.sender_id === currentUserId;
-                      return (
-                        <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-3`}>
-                          <div className={`max-w-xs lg:max-w-sm xl:max-w-md ${isMe ? 'items-end' : 'items-start'} flex flex-col`}>
-                            {!isMe && (
-                              <p className="text-[10px] font-bold text-slate-500 mb-1 ml-1">{msg.sender_name}</p>
-                            )}
-                            <div className={`px-4 py-2.5 rounded-2xl shadow-sm ${
-                              isMe
-                                ? 'bg-emerald-500 text-white rounded-br-sm'
-                                : 'bg-white text-slate-800 border border-slate-100 rounded-bl-sm'
-                            }`}>
-                              <p className="text-sm leading-relaxed">{msg.content}</p>
+                ) : null}
+
+                {!loadingMessages &&
+                  Object.entries(groupedMessages).map(([date, dayMessages]) => (
+                    <div key={date} className="mb-6">
+                      <div className="mb-4 flex items-center gap-3">
+                        <div className="h-px flex-1 bg-slate-200" />
+                        <span className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 shadow-sm">
+                          {date}
+                        </span>
+                        <div className="h-px flex-1 bg-slate-200" />
+                      </div>
+
+                      {dayMessages.map((message) => {
+                        const isCurrentUser = message.sender_id === currentUserId;
+                        return (
+                          <div
+                            key={message.id}
+                            className={`mb-3 flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
+                          >
+                            <div className={`flex max-w-xs flex-col lg:max-w-md ${isCurrentUser ? 'items-end' : 'items-start'}`}>
+                              {!isCurrentUser ? (
+                                <p className="mb-1 ml-1 text-[11px] font-bold text-slate-500">
+                                  {message.sender_name}
+                                </p>
+                              ) : null}
+                              <div
+                                className={`rounded-2xl px-4 py-2.5 shadow-sm ${
+                                  isCurrentUser
+                                    ? 'rounded-br-sm bg-emerald-500 text-white'
+                                    : 'rounded-bl-sm border border-slate-100 bg-white text-slate-800'
+                                }`}
+                              >
+                                <p className="text-sm leading-relaxed">{message.content}</p>
+                              </div>
+                              <p className="mt-1 px-1 text-[10px] text-slate-400">
+                                {formatTime(message.created_at)}
+                              </p>
                             </div>
-                            <p className={`text-[10px] mt-1 ${isMe ? 'text-slate-400 mr-1' : 'text-slate-400 ml-1'}`}>
-                              {formatTime(msg.created_at)}
-                            </p>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
+                  ))}
+
+                {!loadingMessages && messages.length === 0 ? (
+                  <div className="py-16 text-center text-slate-400">
+                    <MessageSquare size={34} className="mx-auto mb-3 opacity-30" />
+                    <p className="text-sm font-semibold text-slate-500">
+                      No messages yet. Start the conversation for {group.name}.
+                    </p>
                   </div>
-                ))}
-                {messages.length === 0 && !loading && (
-                  <div className="text-center py-12 text-slate-400">
-                    <MessageSquare size={32} className="mx-auto mb-2 opacity-20" />
-                    <p className="text-sm font-semibold">No messages yet. Say hello! 👋</p>
-                  </div>
-                )}
-                <div ref={messagesEndRef} />
+                ) : null}
+
+                <div ref={bottomRef} />
               </div>
 
-              {/* Message Input */}
-              <div className="px-6 py-4 bg-white border-t border-slate-100 flex-shrink-0">
+              <div className="flex-shrink-0 border-t border-slate-100 bg-white px-4 py-4 sm:px-6">
                 <form onSubmit={sendMessage} className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center text-white text-xs font-black flex-shrink-0">
-                    {currentUserName.charAt(0)}
+                  <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-slate-800 text-xs font-black text-white">
+                    {initials}
                   </div>
-                  <div className="flex-1 flex items-center gap-2 bg-slate-100 rounded-2xl px-4 py-2.5">
+
+                  <div className="flex flex-1 items-center rounded-2xl bg-slate-100 px-4 py-2.5 transition focus-within:bg-white focus-within:ring-2 focus-within:ring-emerald-400">
                     <input
                       type="text"
                       value={input}
-                      onChange={e => setInput(e.target.value)}
-                      placeholder={`Message ${selectedGroup.name}…`}
-                      className="flex-1 bg-transparent outline-none text-sm text-slate-800 placeholder-slate-400"
+                      onChange={(event) => setInput(event.target.value)}
+                      placeholder={`Message ${group.name}...`}
+                      className="flex-1 bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
+                      disabled={sending}
                     />
                   </div>
+
                   <button
                     type="submit"
                     disabled={!input.trim() || sending}
-                    className="w-10 h-10 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white rounded-2xl flex items-center justify-center transition-all shadow-lg shadow-emerald-500/25 flex-shrink-0"
+                    className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600 disabled:opacity-40"
                   >
                     <Send size={16} />
                   </button>
@@ -236,4 +390,3 @@ const Chat = () => {
 };
 
 export default Chat;
-

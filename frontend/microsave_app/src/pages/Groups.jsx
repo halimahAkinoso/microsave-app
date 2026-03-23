@@ -1,89 +1,162 @@
-import React, { useState, useEffect } from 'react';
-import DashboardLayout from '../components/DashboardLayout';
-import { Users, Plus, CheckCircle, XCircle, Clock, Crown, RefreshCw, X, Shield, AlertTriangle } from 'lucide-react';
-import { API_BASE_URL as API } from '../services/api';
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  AlertTriangle,
+  Banknote,
+  CheckCircle2,
+  Clock3,
+  CreditCard,
+  Crown,
+  PiggyBank,
+  Plus,
+  RefreshCw,
+  Shield,
+  Users,
+  Wallet,
+  X,
+  XCircle,
+} from "lucide-react";
 
-const fmt = (n) => `₦${Number(n).toLocaleString()}`;
-const currentUserId = Number(localStorage.getItem('user_id')) || 1;
+import DashboardLayout from "../components/DashboardLayout";
+import { apiFetch } from "../services/api";
 
-// Toast notification
-const Toast = ({ msg, type, onClose }) => (
-  <div className={`fixed top-5 right-5 z-50 flex items-start gap-3 px-5 py-4 rounded-2xl shadow-2xl max-w-sm animate-fade-in ${
-    type === 'error' ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white'
-  }`}>
-    <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" />
-    <p className="text-sm font-semibold leading-snug flex-1">{msg}</p>
-    <button onClick={onClose} className="opacity-70 hover:opacity-100 flex-shrink-0"><X size={16} /></button>
+const formatCurrency = (value) => `NGN ${Number(value || 0).toLocaleString()}`;
+
+const Toast = ({ message, type, onClose }) => (
+  <div
+    className={`fixed right-5 top-5 z-50 flex max-w-sm items-start gap-3 rounded-2xl px-5 py-4 text-sm shadow-2xl ${
+      type === "error" ? "bg-red-500 text-white" : "bg-emerald-500 text-white"
+    }`}
+  >
+    {type === "error" ? (
+      <AlertTriangle size={18} className="mt-0.5 flex-shrink-0" />
+    ) : (
+      <CheckCircle2 size={18} className="mt-0.5 flex-shrink-0" />
+    )}
+    <p className="flex-1 font-semibold">{message}</p>
+    <button onClick={onClose} className="opacity-80 hover:opacity-100">
+      <X size={16} />
+    </button>
   </div>
 );
 
-
-const loanStatusConfig = {
-  pending:   { bg: 'bg-amber-100',   text: 'text-amber-700',   label: 'Pending'   },
-  active:    { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'Active'    },
-  overdue:   { bg: 'bg-red-100',     text: 'text-red-700',     label: 'Overdue'   },
-  completed: { bg: 'bg-slate-100',   text: 'text-slate-500',   label: 'Completed' },
-};
-
-// ── Create Group Modal ────────────────────────────────────────────────────────
 const CreateGroupModal = ({ onClose, onCreated }) => {
-  const [form, setForm] = useState({ name: '', description: '', contribution_amount: '', contribution_period: 'monthly' });
+  const [form, setForm] = useState({
+    name: "",
+    description: "",
+    savings_amount: "",
+    savings_period: "monthly",
+  });
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const updateField = (field, value) =>
+    setForm((current) => ({ ...current, [field]: value }));
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     setSaving(true);
+    setError("");
+
     try {
-      await fetch(`${API}/groups`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, contribution_amount: Number(form.contribution_amount), admin_id: currentUserId }),
+      await apiFetch("/groups", {
+        method: "POST",
+        body: JSON.stringify({
+          ...form,
+          savings_amount: Number(form.savings_amount || 0),
+        }),
       });
-      onCreated();
+      await onCreated();
       onClose();
-    } finally { setSaving(false); }
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
-          <h3 className="text-lg font-black text-slate-900">Create New Group</h3>
-          <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded-lg"><X size={18} /></button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+          <div>
+            <h2 className="text-lg font-black text-slate-900">Create savings group</h2>
+            <p className="text-xs text-slate-400">The creator becomes the sole group admin.</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1 hover:bg-slate-100">
+            <X size={18} />
+          </button>
         </div>
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+
+        <form onSubmit={handleSubmit} className="space-y-4 px-6 py-5">
+          {error && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+              {error}
+            </div>
+          )}
+
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Group Name</label>
-            <input required value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))}
-              className="w-full px-4 py-2.5 border-2 border-slate-100 rounded-xl focus:border-emerald-500 outline-none text-sm" placeholder="e.g. Market Women Beta" />
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+              Group name
+            </label>
+            <input
+              required
+              value={form.name}
+              onChange={(event) => updateField("name", event.target.value)}
+              className="w-full rounded-xl border-2 border-slate-100 px-4 py-3 text-sm outline-none focus:border-emerald-500"
+              placeholder="Example: Ilupeju Traders Circle"
+            />
           </div>
+
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Description</label>
-            <textarea value={form.description} onChange={e => setForm(f => ({...f, description: e.target.value}))}
-              className="w-full px-4 py-2.5 border-2 border-slate-100 rounded-xl focus:border-emerald-500 outline-none text-sm resize-none" rows={2} placeholder="What is this group about?" />
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+              Description
+            </label>
+            <textarea
+              value={form.description}
+              onChange={(event) => updateField("description", event.target.value)}
+              className="w-full resize-none rounded-xl border-2 border-slate-100 px-4 py-3 text-sm outline-none focus:border-emerald-500"
+              rows={3}
+              placeholder="What is the purpose of this group?"
+            />
           </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Contribution (₦)</label>
-              <input type="number" min="0" value={form.contribution_amount} onChange={e => setForm(f => ({...f, contribution_amount: e.target.value}))}
-                className="w-full px-4 py-2.5 border-2 border-slate-100 rounded-xl focus:border-emerald-500 outline-none text-sm" placeholder="0" />
+              <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                Savings target
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={form.savings_amount}
+                onChange={(event) => updateField("savings_amount", event.target.value)}
+                className="w-full rounded-xl border-2 border-slate-100 px-4 py-3 text-sm outline-none focus:border-emerald-500"
+                placeholder="5000"
+              />
             </div>
+
             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Period</label>
-              <select value={form.contribution_period} onChange={e => setForm(f => ({...f, contribution_period: e.target.value}))}
-                className="w-full px-4 py-2.5 border-2 border-slate-100 rounded-xl focus:border-emerald-500 outline-none text-sm bg-white">
+              <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                Period
+              </label>
+              <select
+                value={form.savings_period}
+                onChange={(event) => updateField("savings_period", event.target.value)}
+                className="w-full rounded-xl border-2 border-slate-100 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-500"
+              >
                 <option value="weekly">Weekly</option>
                 <option value="monthly">Monthly</option>
-                <option value="daily">Daily</option>
               </select>
             </div>
           </div>
-          <p className="text-xs text-slate-400 bg-slate-50 rounded-xl p-3">
-            👑 You will automatically become the <strong>Group Admin (Head)</strong>. New members must request to join and you will approve or reject them.
-          </p>
-          <button type="submit" disabled={saving}
-            className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl transition-all disabled:opacity-60">
-            {saving ? 'Creating…' : 'Create Group'}
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="w-full rounded-xl bg-emerald-500 py-3 font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
+          >
+            {saving ? "Creating..." : "Create group"}
           </button>
         </form>
       </div>
@@ -91,290 +164,893 @@ const CreateGroupModal = ({ onClose, onCreated }) => {
   );
 };
 
-// ── Group Detail Card ─────────────────────────────────────────────────────────
-const GroupCard = ({ group, onRefresh, userGroupId, onToast }) => {
+const MemberActionButtons = ({ canRepayLoan = false }) => {
+  const navigate = useNavigate();
+
+  return (
+    <div className="mt-4 flex flex-wrap gap-2">
+      <button
+        onClick={() => navigate("/fund-wallet")}
+        className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white transition hover:bg-slate-800"
+      >
+        <Wallet size={14} />
+        Fund wallet
+      </button>
+      <button
+        onClick={() => navigate("/fund-wallet?action=pay&type=savings")}
+        className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-600"
+      >
+        <PiggyBank size={14} />
+        Pay savings
+      </button>
+      {canRepayLoan && (
+        <button
+          onClick={() => navigate("/fund-wallet?action=pay&type=loan_repayment")}
+          className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2 text-xs font-bold text-white transition hover:bg-blue-800"
+        >
+          <Banknote size={14} />
+          Repay loan
+        </button>
+      )}
+      <button
+        onClick={() => navigate("/loans?action=request")}
+        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+      >
+        <CreditCard size={14} />
+        Request loan
+      </button>
+    </div>
+  );
+};
+
+const PersonalMemberCard = ({ member }) => {
+  const currentLoan = member?.current_loan;
+
+  return (
+    <section className="space-y-4">
+      <div className="rounded-3xl border border-slate-200 bg-white p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">
+              My profile
+            </p>
+            <h3 className="mt-2 text-xl font-black text-slate-900">{member.name}</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              {member.occupation || "Member"}
+              {member.phone ? ` | ${member.phone}` : ""}
+            </p>
+          </div>
+          <span className="rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-700">
+            {member.role}
+          </span>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Total savings
+            </p>
+            <p className="mt-1 text-lg font-black text-emerald-600">
+              {formatCurrency(member.total_savings)}
+            </p>
+          </div>
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Wallet balance
+            </p>
+            <p className="mt-1 text-lg font-black text-slate-900">
+              {formatCurrency(member.wallet_balance)}
+            </p>
+          </div>
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Outstanding loan
+            </p>
+            <p className="mt-1 text-lg font-black text-rose-600">
+              {formatCurrency(member.outstanding_balance)}
+            </p>
+          </div>
+        </div>
+
+        {currentLoan ? (
+          <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-blue-500">
+                  Current loan
+                </p>
+                <p className="mt-1 text-sm font-black text-slate-900">
+                  {currentLoan.purpose || "Loan request"}
+                </p>
+              </div>
+              <span className="rounded-full bg-white px-3 py-1 text-[10px] font-black uppercase tracking-wide text-blue-700">
+                {currentLoan.status}
+              </span>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  Loan amount
+                </p>
+                <p className="mt-1 text-base font-black text-slate-900">
+                  {formatCurrency(currentLoan.amount)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  Remaining
+                </p>
+                <p className="mt-1 text-base font-black text-rose-600">
+                  {formatCurrency(currentLoan.remaining_balance)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  Progress
+                </p>
+                <p className="mt-1 text-base font-black text-emerald-600">
+                  {currentLoan.repayment_progress}%
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-white">
+              <div
+                className="h-full rounded-full bg-emerald-500"
+                style={{ width: `${currentLoan.repayment_progress}%` }}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+            No current loan on this membership.
+          </div>
+        )}
+
+        <MemberActionButtons canRepayLoan={Boolean(currentLoan)} />
+      </div>
+    </section>
+  );
+};
+
+const GroupCard = ({ group, myMembership, onRefresh, onNotify }) => {
+  const [expanded, setExpanded] = useState(false);
   const [members, setMembers] = useState([]);
   const [joinRequests, setJoinRequests] = useState([]);
-  const [expanded, setExpanded] = useState(false);
-  const [joining, setJoining] = useState(false);
-  const isAdmin = group.admin_id === currentUserId;
-  const isMyGroup = userGroupId === group.id;
+  const [loans, setLoans] = useState([]);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [workingAction, setWorkingAction] = useState("");
+
+  const viewerMembership = group.viewer_membership;
+  const isAdmin = viewerMembership?.role === "admin" && viewerMembership?.join_status === "approved";
+  const isMyGroup =
+    myMembership?.group_id === group.id && myMembership?.join_status === "approved";
+  const hasLockedMembership =
+    myMembership && ["approved", "pending"].includes(myMembership.join_status);
+  const canJoin =
+    !hasLockedMembership &&
+    (!viewerMembership || viewerMembership.join_status === "rejected");
+
+  const pendingLoans = useMemo(
+    () => loans.filter((loan) => loan.status === "pending"),
+    [loans]
+  );
+  const onLoanMembers = useMemo(
+    () => loans.filter((loan) => ["active", "overdue"].includes(loan.status)),
+    [loans]
+  );
+  const personalMember = members.find((member) => member.is_self) || members[0] || null;
 
   const loadDetails = async () => {
-    const [mr, jr] = await Promise.all([
-      fetch(`${API}/groups/${group.id}/members`).then(r => r.json()),
-      isAdmin ? fetch(`${API}/groups/${group.id}/join-requests`).then(r => r.json()) : Promise.resolve([]),
-    ]);
-    setMembers(mr);
-    setJoinRequests(jr);
-  };
+    if (!isMyGroup && !isAdmin) {
+      return;
+    }
 
-  useEffect(() => { if (expanded) loadDetails(); }, [expanded]);
-
-  const handleJoin = async () => {
-    setJoining(true);
+    setLoadingDetails(true);
     try {
-      const res = await fetch(`${API}/groups/${group.id}/join`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: currentUserId }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        onToast(data.detail || 'Could not join group.', 'error');
-      } else {
-        onToast(data.message || 'Join request submitted!', 'success');
-      }
-    } catch {
-      onToast('Network error. Please try again.', 'error');
+      const [memberList, loanList, requests] = await Promise.all([
+        apiFetch("/members"),
+        apiFetch("/loans"),
+        isAdmin ? apiFetch(`/groups/${group.id}/join-requests`) : Promise.resolve([]),
+      ]);
+      setMembers(Array.isArray(memberList) ? memberList : []);
+      setLoans(Array.isArray(loanList) ? loanList : []);
+      setJoinRequests(Array.isArray(requests) ? requests : []);
+    } catch (error) {
+      onNotify(error.message, "error");
     } finally {
-      setJoining(false);
+      setLoadingDetails(false);
     }
   };
 
-  const handleApproval = async (memberId, action) => {
-    await fetch(`${API}/groups/${group.id}/join-requests/${memberId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action }),
-    });
-    await loadDetails();
-    onRefresh();
+  useEffect(() => {
+    if (expanded) {
+      loadDetails();
+    }
+  }, [expanded]);
+
+  const handleJoin = async () => {
+    setWorkingAction("join");
+    try {
+      const response = await apiFetch(`/groups/${group.id}/join`, { method: "POST" });
+      onNotify(response.message, "success");
+      await onRefresh();
+    } catch (error) {
+      onNotify(error.message, "error");
+    } finally {
+      setWorkingAction("");
+    }
   };
 
-  const membersOnLoan = members.filter(m => m.loans && m.loans.length > 0);
-  const activeMembers = members.filter(m => m.loans?.some(l => l.status === 'active')).length;
+  const handleRequestDecision = async (memberId, action) => {
+    setWorkingAction(`${action}-${memberId}`);
+    try {
+      const response = await apiFetch(`/groups/${group.id}/join-requests/${memberId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action }),
+      });
+      onNotify(response.message, "success");
+      await loadDetails();
+      await onRefresh();
+    } catch (error) {
+      onNotify(error.message, "error");
+    } finally {
+      setWorkingAction("");
+    }
+  };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-      {/* Card Header */}
+    <article className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
       <div className="p-6">
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50">
               <Shield size={22} className="text-emerald-600" />
             </div>
             <div>
-              <h3 className="text-lg font-black text-slate-900">{group.name}</h3>
-              <div className="flex items-center gap-1 mt-0.5">
-                <Crown size={11} className="text-amber-500" />
-                <p className="text-xs text-slate-400 font-semibold">{group.admin_name}</p>
+              <h2 className="text-lg font-black text-slate-900">{group.name}</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {group.description || "No description yet."}
+              </p>
+              <div className="mt-2 flex items-center gap-1 text-xs font-semibold text-amber-600">
+                <Crown size={12} />
+                <span>{group.admin_name}</span>
               </div>
             </div>
           </div>
-          {isAdmin && (
-            <span className="px-2.5 py-1 bg-purple-100 text-purple-700 text-[10px] font-black uppercase tracking-wide rounded-full">Admin</span>
-          )}
+
+          {isAdmin ? (
+            <span className="rounded-full bg-slate-900 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-white">
+              Admin
+            </span>
+          ) : viewerMembership?.join_status === "pending" ? (
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-amber-700">
+              Pending
+            </span>
+          ) : isMyGroup ? (
+            <span className="rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-700">
+              Member
+            </span>
+          ) : null}
         </div>
 
-        <div className="grid grid-cols-3 gap-3 mb-4">
-          <div className="bg-slate-50 rounded-xl p-3">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Members</p>
-            <p className="text-xl font-black text-slate-900">{group.member_count}</p>
+        <div className="mb-5 grid grid-cols-3 gap-3">
+          <div className="rounded-2xl bg-slate-50 p-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Members
+            </p>
+            <p className="mt-1 text-xl font-black text-slate-900">{group.member_count}</p>
           </div>
-          <div className="bg-slate-50 rounded-xl p-3">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Balance</p>
-            <p className="text-sm font-black text-emerald-600">{fmt(group.balance)}</p>
+          <div className="rounded-2xl bg-slate-50 p-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Balance
+            </p>
+            <p className="mt-1 text-sm font-black text-emerald-600">
+              {formatCurrency(group.balance)}
+            </p>
           </div>
-          <div className="bg-slate-50 rounded-xl p-3">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Contribution</p>
-            <p className="text-sm font-black text-slate-700">{fmt(group.contribution_amount)}/{group.contribution_period === 'weekly' ? 'wk' : 'mo'}</p>
+          <div className="rounded-2xl bg-slate-50 p-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Savings target
+            </p>
+            <p className="mt-1 text-sm font-black text-slate-700">
+              {formatCurrency(group.savings_amount)}/{group.savings_period}
+            </p>
           </div>
         </div>
 
-        <div className="flex gap-2">
-          <button onClick={() => setExpanded(e => !e)}
-            className="flex-1 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors">
-            {expanded ? 'Hide Details ▲' : 'View Members ▼'}
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={() => setExpanded((current) => !current)}
+            className="rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-200"
+          >
+            {expanded ? "Hide details" : "Open group"}
           </button>
-          {/* Show join btn only if not admin and user isn't already in a group */}
-          {!isAdmin && !userGroupId && (
-            <button onClick={handleJoin} disabled={joining}
-              className="flex-1 py-2 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 rounded-xl transition-all disabled:opacity-60">
-              {joining ? 'Requesting…' : 'Request to Join'}
+
+          {canJoin && (
+            <button
+              onClick={handleJoin}
+              disabled={workingAction === "join"}
+              className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
+            >
+              {workingAction === "join" ? "Requesting..." : "Request to join"}
             </button>
           )}
-          {/* User is in THIS group — show badge */}
-          {isMyGroup && !isAdmin && (
-            <span className="flex-1 py-2 text-xs font-bold text-center text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl">
-              ✅ Your Group
-            </span>
-          )}
-          {/* User is in a DIFFERENT group — show disabled */}
-          {!isAdmin && userGroupId && !isMyGroup && (
-            <span className="flex-1 py-2 text-xs font-bold text-center text-slate-400 bg-slate-50 border border-slate-200 rounded-xl">
-              🔒 One group only
+
+          {!canJoin && !viewerMembership && hasLockedMembership && (
+            <span className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-bold text-slate-500">
+              One active group flow only
             </span>
           )}
         </div>
       </div>
 
-      {/* Expanded Detail */}
       {expanded && (
-        <div className="border-t border-slate-100 bg-slate-50/50 px-6 py-5 space-y-5">
-
-          {/* Admin: Pending Join Requests */}
-          {isAdmin && joinRequests.length > 0 && (
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <Clock size={14} className="text-amber-500" />
-                <h4 className="text-xs font-black text-amber-700 uppercase tracking-wide">Pending Join Requests ({joinRequests.length})</h4>
-              </div>
-              <div className="space-y-2">
-                {joinRequests.map(req => (
-                  <div key={req.id} className="flex items-center gap-3 bg-white rounded-xl px-4 py-3 border border-amber-100">
-                    <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center font-black text-amber-700 text-xs">
-                      {req.name.charAt(0)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-slate-800 truncate">{req.name}</p>
-                      <p className="text-xs text-slate-400">{req.occupation || 'Member'} • {req.phone}</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => handleApproval(req.id, 'approve')}
-                        className="p-1.5 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-lg transition-colors">
-                        <CheckCircle size={15} />
-                      </button>
-                      <button onClick={() => handleApproval(req.id, 'reject')}
-                        className="p-1.5 bg-red-100 text-red-600 hover:bg-red-200 rounded-lg transition-colors">
-                        <XCircle size={15} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+        <div className="border-t border-slate-100 bg-slate-50/70 px-6 py-5">
+          {loadingDetails ? (
+            <div className="flex justify-center py-8">
+              <div className="h-9 w-9 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
             </div>
-          )}
-
-          {/* Member List */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="text-xs font-black text-slate-600 uppercase tracking-wide">Members ({members.length})</h4>
-              <span className="text-xs text-emerald-600 font-bold">{activeMembers} on active loan</span>
-            </div>
-            <div className="space-y-2">
-              {members.length === 0 && <p className="text-xs text-slate-400 text-center py-3">No approved members yet.</p>}
-              {members.map(m => (
-                <div key={m.id} className="flex items-center gap-3 bg-white rounded-xl px-4 py-3 border border-slate-100">
-                  <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center font-black text-slate-600 text-xs">
-                    {m.name.charAt(0)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-slate-800 truncate">{m.name}</p>
-                    <p className="text-xs text-slate-400 truncate">{m.occupation || 'Member'}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {m.loans?.map(l => {
-                      const cfg = loanStatusConfig[l.status] || loanStatusConfig.pending;
-                      return <span key={l.id} className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${cfg.bg} ${cfg.text}`}>{cfg.label}</span>;
-                    })}
-                    <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${
-                      m.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-500'
-                    }`}>{m.role === 'admin' ? '👑 Admin' : 'Member'}</span>
-                  </div>
+          ) : isAdmin ? (
+            <div className="space-y-6">
+              <section>
+                <div className="mb-3 flex items-center gap-2">
+                  <Clock3 size={14} className="text-amber-600" />
+                  <h3 className="text-xs font-black uppercase tracking-wide text-amber-700">
+                    Membership requests ({joinRequests.length})
+                  </h3>
                 </div>
-              ))}
-            </div>
-          </div>
 
-          {/* Members on Loan */}
-          {membersOnLoan.length > 0 && (
-            <div>
-              <h4 className="text-xs font-black text-slate-600 uppercase tracking-wide mb-3">Members on Loan</h4>
-              <div className="space-y-2">
-                {membersOnLoan.map(m => (
-                  m.loans.map(l => {
-                    const cfg = loanStatusConfig[l.status] || loanStatusConfig.pending;
-                    return (
-                      <div key={l.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-slate-100">
-                        <div>
-                          <p className="text-sm font-bold text-slate-800">{m.name}</p>
-                          <p className="text-xs text-slate-400">{l.purpose || 'Loan'} • {fmt(l.amount)}</p>
+                {joinRequests.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-400">
+                    No pending membership requests.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {joinRequests.map((request) => (
+                      <div
+                        key={request.id}
+                        className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3"
+                      >
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-sm font-black text-amber-700">
+                          {request.name?.slice(0, 1) || "U"}
                         </div>
-                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${cfg.bg} ${cfg.text}`}>{cfg.label}</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-bold text-slate-900">{request.name}</p>
+                          <p className="truncate text-xs text-slate-400">
+                            {request.occupation || "Member"}
+                            {request.phone ? ` | ${request.phone}` : ""}
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleRequestDecision(request.id, "approve")}
+                            disabled={workingAction === `approve-${request.id}`}
+                            className="rounded-lg bg-emerald-100 p-2 text-emerald-700 transition hover:bg-emerald-200 disabled:opacity-60"
+                          >
+                            <CheckCircle2 size={15} />
+                          </button>
+                          <button
+                            onClick={() => handleRequestDecision(request.id, "reject")}
+                            disabled={workingAction === `reject-${request.id}`}
+                            className="rounded-lg bg-red-100 p-2 text-red-700 transition hover:bg-red-200 disabled:opacity-60"
+                          >
+                            <XCircle size={15} />
+                          </button>
+                        </div>
                       </div>
-                    );
-                  })
-                ))}
-              </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <h3 className="mb-3 text-xs font-black uppercase tracking-wide text-slate-600">
+                  Loan requests ({pendingLoans.length})
+                </h3>
+                {pendingLoans.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-400">
+                    No pending loan requests.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {pendingLoans.map((loan) => (
+                      <div
+                        key={loan.id}
+                        className="rounded-2xl border border-amber-200 bg-white p-4"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-black text-slate-900">
+                              {loan.borrower_name}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-400">
+                              {loan.purpose || "No purpose provided"}
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-amber-100 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-amber-700">
+                            Pending
+                          </span>
+                        </div>
+                        <div className="mt-4 grid gap-3 md:grid-cols-4">
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              Amount
+                            </p>
+                            <p className="mt-1 text-sm font-black text-slate-900">
+                              {formatCurrency(loan.amount)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              Saved
+                            </p>
+                            <p className="mt-1 text-sm font-black text-emerald-600">
+                              {formatCurrency(loan.eligibility?.total_saved)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              Minimum savings
+                            </p>
+                            <p className="mt-1 text-sm font-black text-slate-900">
+                              {formatCurrency(loan.eligibility?.required_savings)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              Decision
+                            </p>
+                            <p className="mt-1 text-sm font-black text-amber-700">
+                              {loan.eligibility?.eligible ? "Eligible" : "Review needed"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <h3 className="mb-3 text-xs font-black uppercase tracking-wide text-slate-600">
+                  Members on loan ({onLoanMembers.length})
+                </h3>
+                {onLoanMembers.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-400">
+                    No active or overdue loans.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {onLoanMembers.map((loan) => (
+                      <div key={loan.id} className="rounded-2xl border border-slate-100 bg-white p-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-black text-slate-900">{loan.borrower_name}</p>
+                            <p className="mt-1 text-xs text-slate-400">
+                              {loan.purpose || "Loan"}
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-blue-100 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-blue-700">
+                            {loan.status}
+                          </span>
+                        </div>
+                        <div className="mt-4 grid gap-3 md:grid-cols-3">
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              Loan amount
+                            </p>
+                            <p className="mt-1 text-sm font-black text-slate-900">
+                              {formatCurrency(loan.amount)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              Remaining
+                            </p>
+                            <p className="mt-1 text-sm font-black text-rose-600">
+                              {formatCurrency(loan.remaining_balance)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              Progress
+                            </p>
+                            <p className="mt-1 text-sm font-black text-emerald-600">
+                              {loan.repayment_progress}%
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full bg-emerald-500"
+                            style={{ width: `${loan.repayment_progress}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <h3 className="mb-3 text-xs font-black uppercase tracking-wide text-slate-600">
+                  Approved members ({members.length})
+                </h3>
+                {members.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-400">
+                    No approved members yet.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {members.map((member) => (
+                      <div
+                        key={member.id}
+                        className="rounded-2xl border border-slate-100 bg-white p-4"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-black text-slate-900">{member.name}</p>
+                              {member.role === "admin" && (
+                                <span className="rounded-full bg-slate-900 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-white">
+                                  Admin
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-1 text-xs text-slate-400">
+                              {member.occupation || "Member"}
+                              {member.phone ? ` | ${member.phone}` : ""}
+                            </p>
+                          </div>
+                          {member.current_loan ? (
+                            <span className="rounded-full bg-blue-100 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-blue-700">
+                              On loan
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-slate-500">
+                              No loan
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="mt-4 grid gap-3 md:grid-cols-4">
+                          <div className="rounded-2xl bg-slate-50 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              Savings
+                            </p>
+                            <p className="mt-1 text-sm font-black text-emerald-600">
+                              {formatCurrency(member.total_savings)}
+                            </p>
+                          </div>
+                          <div className="rounded-2xl bg-slate-50 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              Current loan
+                            </p>
+                            <p className="mt-1 text-sm font-black text-slate-900">
+                              {formatCurrency(member.current_loan?.amount || 0)}
+                            </p>
+                          </div>
+                          <div className="rounded-2xl bg-slate-50 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              Outstanding
+                            </p>
+                            <p className="mt-1 text-sm font-black text-rose-600">
+                              {formatCurrency(member.outstanding_balance)}
+                            </p>
+                          </div>
+                          <div className="rounded-2xl bg-slate-50 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              Progress
+                            </p>
+                            <p className="mt-1 text-sm font-black text-slate-900">
+                              {member.current_loan?.repayment_progress || 0}%
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          ) : isMyGroup && personalMember ? (
+            <PersonalMemberCard member={personalMember} />
+          ) : (
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-sm text-slate-500">
+              Join this group to unlock member details, wallet actions, payments, and loan requests.
             </div>
           )}
         </div>
       )}
+    </article>
+  );
+};
+
+const MembershipOnboarding = ({ membership, onCreateGroup }) => {
+  const navigate = useNavigate();
+
+  if (membership?.join_status === "pending") {
+    return (
+      <div className="mb-6 rounded-3xl border border-amber-200 bg-amber-50 p-6">
+        <p className="text-xs font-black uppercase tracking-[0.2em] text-amber-600">
+          Membership pending
+        </p>
+        <h2 className="mt-2 text-2xl font-black text-slate-900">
+          Your join request is waiting for admin approval
+        </h2>
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
+          You already requested access to <strong>{membership.group_name}</strong>. Once approved,
+          your account will unlock savings, wallet payments, loan requests, and group chat.
+        </p>
+      </div>
+    );
+  }
+
+  if (membership?.join_status === "approved") {
+    return null;
+  }
+
+  return (
+    <div className="mb-6 rounded-3xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-white p-6">
+      <p className="text-xs font-black uppercase tracking-[0.2em] text-emerald-600">
+        Group onboarding
+      </p>
+      <h2 className="mt-2 text-2xl font-black text-slate-900">
+        Join a group before using savings and loan features
+      </h2>
+      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
+        Choose one existing group below and request membership, or create your own group and
+        become the admin. Your savings, loans, and repayments will be attached to the
+        approved group.
+      </p>
+      <div className="mt-4 flex flex-wrap gap-3">
+        <button
+          onClick={onCreateGroup}
+          className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-bold text-white transition hover:bg-emerald-600"
+        >
+          <Plus size={16} />
+          Create group
+        </button>
+        <button
+          onClick={() => navigate("/dashboard")}
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+        >
+          <Shield size={16} />
+          View dashboard
+        </button>
+      </div>
     </div>
   );
 };
 
-// ── Groups Page ───────────────────────────────────────────────────────────────
 const Groups = () => {
   const [groups, setGroups] = useState([]);
+  const [myMembership, setMyMembership] = useState(null);
+  const [adminRequests, setAdminRequests] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [toast, setToast] = useState(null);
-  const [userGroupId, setUserGroupId] = useState(null);
+  const [processingRequestId, setProcessingRequestId] = useState(null);
 
-  const showToast = (msg, type = 'success') => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 4000);
+  const showToast = (message, type = "success") => {
+    setToast({ message, type });
+    window.setTimeout(() => setToast(null), 4000);
   };
 
-  const load = async () => {
+  const loadPage = async () => {
     setLoading(true);
     try {
-      const data = await fetch(`${API}/groups`).then(r => r.json());
-      setGroups(data);
-      // Check if user is already an approved member of any group
-      const memberRes = await fetch(`${API}/members?user_id=${currentUserId}`).then(r => r.json()).catch(() => []);
-      // Find approved membership
-      const myMembership = await fetch(`${API}/groups`)
-        .then(r => r.json())
-        .then(async (gs) => {
-          for (const g of gs) {
-            const members = await fetch(`${API}/groups/${g.id}/members`).then(r => r.json()).catch(() => []);
-            const me = members.find(m => m.user_id === currentUserId);
-            if (me) return g.id;
-          }
-          return null;
-        });
-      setUserGroupId(myMembership);
-    } finally { setLoading(false); }
+      const [groupList, membershipResponse] = await Promise.all([
+        apiFetch("/groups"),
+        apiFetch("/groups/my-membership"),
+      ]);
+      setGroups(groupList);
+      setMyMembership(membershipResponse.membership);
+      if (
+        membershipResponse.membership?.role === "admin" &&
+        membershipResponse.membership?.join_status === "approved"
+      ) {
+        const pending = await apiFetch(
+          `/groups/${membershipResponse.membership.group_id}/join-requests`
+        ).catch(() => []);
+        setAdminRequests(Array.isArray(pending) ? pending : []);
+      } else {
+        setAdminRequests([]);
+      }
+    } catch (error) {
+      showToast(error.message, "error");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    loadPage();
+  }, []);
+
+  const canCreateGroup = !myMembership;
+  const isAdmin =
+    myMembership?.role === "admin" && myMembership?.join_status === "approved";
+
+  const handleAdminRequestDecision = async (memberId, action) => {
+    if (!myMembership?.group_id) {
+      return;
+    }
+    setProcessingRequestId(memberId);
+    try {
+      const response = await apiFetch(
+        `/groups/${myMembership.group_id}/join-requests/${memberId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ action }),
+        }
+      );
+      showToast(response.message, "success");
+      await loadPage();
+    } catch (error) {
+      showToast(error.message, "error");
+    } finally {
+      setProcessingRequestId(null);
+    }
+  };
 
   return (
     <DashboardLayout>
-      {toast && <Toast msg={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
-      {showCreate && <CreateGroupModal onClose={() => setShowCreate(false)} onCreated={load} />}
-      <div className="px-8 py-8 max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+      {showCreateModal && (
+        <CreateGroupModal
+          onClose={() => setShowCreateModal(false)}
+          onCreated={loadPage}
+        />
+      )}
+
+      <div className="mx-auto max-w-7xl px-8 py-8">
+        <div className="mb-8 flex items-start justify-between gap-4">
           <div>
             <h1 className="text-3xl font-black text-slate-900">Groups</h1>
-            <p className="text-slate-500 font-medium mt-1">Manage your savings groups, members, and loan requests.</p>
+            <p className="mt-1 text-slate-500">
+              Members can belong to only one active group. Admins manage membership and loan approvals.
+            </p>
+            {myMembership && (
+              <p className="mt-3 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-slate-700">
+                Current membership: {myMembership.group_name} ({myMembership.role})
+              </p>
+            )}
           </div>
+
           <div className="flex gap-3">
-            <button onClick={load} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 shadow-sm">
-              <RefreshCw size={15} />
+            <button
+              onClick={loadPage}
+              className="rounded-xl border border-slate-200 bg-white p-2.5 text-slate-600 shadow-sm transition hover:bg-slate-50"
+            >
+              <RefreshCw size={16} />
             </button>
-            <button onClick={() => setShowCreate(true)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-emerald-500/25 transition-all">
-              <Plus size={16} /> Create Group
+            <button
+              onClick={() => setShowCreateModal(true)}
+              disabled={!canCreateGroup}
+              className="flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus size={16} />
+              Create group
             </button>
           </div>
         </div>
 
+        <MembershipOnboarding
+          membership={myMembership}
+          onCreateGroup={() => setShowCreateModal(true)}
+        />
+
+        {isAdmin && (
+          <section className="mb-6 rounded-3xl border border-amber-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-amber-100 px-6 py-5">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.2em] text-amber-600">
+                  Admin approvals
+                </p>
+                <h2 className="mt-2 text-xl font-black text-slate-900">
+                  Membership requests
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Approve or reject people asking to join {myMembership.group_name}. This same queue is also available on Members and Approvals.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black uppercase tracking-wide text-amber-700">
+                  {adminRequests.length} pending
+                </span>
+                <a
+                  href="/approvals"
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+                >
+                  <Users size={14} />
+                  Full queue
+                </a>
+              </div>
+            </div>
+
+            <div className="px-6 py-5">
+              {adminRequests.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                  No membership requests are waiting for approval.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {adminRequests.map((request) => (
+                    <div
+                      key={request.id}
+                      className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4"
+                    >
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-100 text-sm font-black text-amber-700">
+                        {request.name?.slice(0, 1) || "U"}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-black text-slate-900">
+                          {request.name}
+                        </p>
+                        <p className="truncate text-xs text-slate-400">
+                          {request.occupation || "Member"}
+                          {request.phone ? ` | ${request.phone}` : ""}
+                          {request.email ? ` | ${request.email}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleAdminRequestDecision(request.id, "approve")}
+                          disabled={processingRequestId === request.id}
+                          className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
+                        >
+                          <CheckCircle2 size={14} />
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => handleAdminRequestDecision(request.id, "reject")}
+                          disabled={processingRequestId === request.id}
+                          className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700 transition hover:bg-red-100 disabled:opacity-60"
+                        >
+                          <XCircle size={14} />
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {!canCreateGroup && myMembership?.join_status === "approved" && (
+          <div className="mb-6 rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-sm text-slate-600">
+            Group creation is disabled because this account already has an approved group.
+          </div>
+        )}
+
         {loading ? (
           <div className="flex justify-center py-20">
-            <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+            <div className="h-10 w-10 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
           </div>
         ) : groups.length === 0 ? (
-          <div className="text-center py-20 text-slate-400">
-            <Users size={40} className="mx-auto mb-3 opacity-30" />
-            <p className="font-semibold">No groups yet. Create the first one!</p>
+          <div className="rounded-3xl border border-dashed border-slate-200 bg-white py-20 text-center text-slate-400">
+            <Users size={42} className="mx-auto mb-3 opacity-30" />
+            <p className="font-semibold">No groups available yet.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {groups.map(g => <GroupCard key={g.id} group={g} onRefresh={load} userGroupId={userGroupId} onToast={showToast} />)}
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+            {groups.map((group) => (
+              <GroupCard
+                key={group.id}
+                group={group}
+                myMembership={myMembership}
+                onRefresh={loadPage}
+                onNotify={showToast}
+              />
+            ))}
           </div>
         )}
       </div>

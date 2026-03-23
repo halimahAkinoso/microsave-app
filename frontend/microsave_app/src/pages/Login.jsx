@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, Mail, Loader2, Wallet } from 'lucide-react';
 import { API_BASE_URL } from '../services/api';
+import { saveSession } from '../hooks/useAuth';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -31,11 +32,9 @@ const Login = () => {
       const data = await response.json();
 
       if (response.ok) {
-        localStorage.setItem('token', data.access_token);
-        localStorage.setItem('user_id', data.user_id);
-        localStorage.setItem('user_name', data.name);
-        localStorage.setItem('user_email', data.email);
-        navigate('/dashboard');
+        saveSession(data.access_token, data.user);
+        const hasApprovedMembership = data.user?.membership?.join_status === 'approved';
+        navigate(hasApprovedMembership ? '/dashboard' : '/groups');
       } else {
         setError(data.detail || 'Login failed. Please check your credentials.');
       }

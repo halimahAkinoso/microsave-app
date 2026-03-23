@@ -1,332 +1,422 @@
-import React, { useState, useEffect } from 'react';
-import DashboardLayout from '../components/DashboardLayout';
+import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
-  Wallet, CreditCard, CheckCircle, AlertTriangle,
-  RefreshCw, Banknote, PiggyBank, ArrowRight, Zap
+  AlertTriangle,
+  ArrowRight,
+  Banknote,
+  CheckCircle,
+  CreditCard,
+  PiggyBank,
+  RefreshCw,
+  Wallet,
+  Zap,
 } from 'lucide-react';
-import { API_BASE_URL as API } from '../services/api';
 
-const fmt = (n) => `₦${Number(n).toLocaleString()}`;
+import DashboardLayout from '../components/DashboardLayout';
+import { apiFetch } from '../services/api';
 
-const DEMO_CARDS = [
-  { number: '4084 0840 8408 4081', bank: 'GTBank', type: 'Visa' },
-  { number: '5531 8866 5214 2950', bank: 'Access Bank', type: 'Mastercard' },
-];
+const formatCurrency = (value) => `NGN ${Number(value || 0).toLocaleString()}`;
 const QUICK_AMOUNTS = [1000, 2000, 5000, 10000, 20000, 50000];
+const PAYMENT_METHODS = [
+  {
+    value: 'bank_transfer',
+    label: 'Bank Transfer',
+    description: 'Redirect to Paystack and complete the wallet top-up with bank transfer.',
+    icon: Wallet,
+  },
+  {
+    value: 'card',
+    label: 'Debit Card',
+    description: 'Redirect to Paystack and pay with a bank card before the wallet is credited.',
+    icon: CreditCard,
+  },
+  {
+    value: 'ussd',
+    label: 'USSD',
+    description: 'Redirect to Paystack and complete the wallet top-up with USSD.',
+    icon: Zap,
+  },
+];
 
-// ── Wallet Balance Card ─────────────────────────────────────────────────────
+const paymentMethodLabel = (value) =>
+  PAYMENT_METHODS.find((method) => method.value === value)?.label || 'Selected method';
+
 const BalanceCard = ({ wallet }) => (
-  <div className="bg-gradient-to-br from-slate-900 to-slate-700 rounded-3xl p-7 text-white shadow-2xl">
-    <div className="flex items-center gap-3 mb-5">
-      <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg">
+  <div className="rounded-3xl bg-gradient-to-br from-slate-900 to-slate-700 p-7 text-white shadow-2xl">
+    <div className="mb-5 flex items-center gap-3">
+      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500 shadow-lg">
         <Wallet size={20} className="text-white" />
       </div>
       <div>
-        <p className="text-slate-400 text-xs font-bold uppercase tracking-wider">Wallet Balance</p>
-        <p className="text-white font-black text-sm">{wallet?.user_name || 'You'}</p>
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Wallet Balance</p>
+        <p className="text-sm font-black text-white">{wallet?.user_name || 'You'}</p>
       </div>
     </div>
-    <p className="text-4xl font-black mb-1">{wallet ? fmt(wallet.balance) : '—'}</p>
-    <p className="text-slate-400 text-xs font-medium">Available to spend</p>
-    <div className="mt-5 pt-4 border-t border-white/10 flex items-center justify-between">
-      <div className="w-8 h-6 bg-yellow-400/80 rounded" />
-      <p className="text-slate-400 text-xs font-mono">**** **** **** 4081</p>
-    </div>
+    <p className="mb-1 text-4xl font-black">{wallet ? formatCurrency(wallet.balance) : '-'}</p>
+    <p className="text-xs font-medium text-slate-400">Available to spend</p>
   </div>
 );
 
-// ── Shared Amount Picker ────────────────────────────────────────────────────
-const AmountPicker = ({ amount, setAmount, placeholder = '0.00' }) => (
+const AmountPicker = ({ amount, setAmount }) => (
   <div>
-    <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Amount (₦)</label>
+    <label className="mb-2 block text-xs font-black uppercase tracking-widest text-slate-500">Amount</label>
     <div className="relative">
-      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-black text-lg">₦</span>
+      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-black text-slate-400">NGN</span>
       <input
-        type="number" min="1" value={amount}
-        onChange={e => setAmount(e.target.value)}
-        placeholder={placeholder}
-        className="w-full pl-9 pr-4 py-4 border-2 border-slate-100 rounded-xl focus:border-emerald-500 outline-none text-xl font-black text-slate-900"
+        type="number"
+        min="1"
+        value={amount}
+        onChange={(event) => setAmount(event.target.value)}
+        className="w-full rounded-xl border-2 border-slate-100 py-4 pl-16 pr-4 text-xl font-black text-slate-900 outline-none focus:border-emerald-500"
+        placeholder="0"
       />
     </div>
-    <div className="flex flex-wrap gap-2 mt-3">
-      {QUICK_AMOUNTS.map(a => (
-        <button key={a} onClick={() => setAmount(String(a))}
-          className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
-            Number(amount) === a ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-emerald-400'
-          }`}>
-          {fmt(a)}
+    <div className="mt-3 flex flex-wrap gap-2">
+      {QUICK_AMOUNTS.map((quickAmount) => (
+        <button
+          key={quickAmount}
+          onClick={() => setAmount(String(quickAmount))}
+          className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+            Number(amount) === quickAmount
+              ? 'border-emerald-500 bg-emerald-500 text-white'
+              : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-emerald-400'
+          }`}
+        >
+          {formatCurrency(quickAmount)}
         </button>
       ))}
     </div>
   </div>
 );
 
-// ── Stage: Processing ───────────────────────────────────────────────────────
-const Processing = () => (
-  <div className="text-center py-14">
-    <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-6" />
-    <h3 className="text-xl font-black text-slate-900 mb-2">Processing…</h3>
-    <p className="text-slate-400 font-medium mb-6">Please wait.</p>
-    <div className="space-y-2 max-w-xs mx-auto">
-      {['Verifying details', 'Contacting bank', 'Authorizing'].map((s, i) => (
-        <div key={i} className="flex items-center gap-3 bg-slate-50 rounded-xl px-4 py-2.5">
-          <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" style={{ animationDelay: `${i * 200}ms` }} />
-          <p className="text-sm font-semibold text-slate-600">{s}</p>
-        </div>
-      ))}
+const PaymentMethodPicker = ({ selected, onSelect }) => (
+  <div>
+    <label className="mb-2 block text-xs font-black uppercase tracking-widest text-slate-500">Payment Method</label>
+    <div className="grid gap-3 md:grid-cols-3">
+      {PAYMENT_METHODS.map((method) => {
+        const Icon = method.icon;
+        const active = selected === method.value;
+        return (
+          <button
+            key={method.value}
+            onClick={() => onSelect(method.value)}
+            className={`rounded-2xl border-2 p-4 text-left transition ${
+              active ? 'border-emerald-500 bg-emerald-50' : 'border-slate-100 bg-white hover:border-slate-200'
+            }`}
+          >
+            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-white">
+              <Icon size={18} />
+            </div>
+            <p className="text-sm font-black text-slate-900">{method.label}</p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">{method.description}</p>
+          </button>
+        );
+      })}
     </div>
   </div>
 );
 
-// ── Stage: Success ──────────────────────────────────────────────────────────
-const Success = ({ amount, label, newBalance, onAgain, onBack }) => (
-  <div className="text-center py-10">
-    <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-5">
+const Processing = ({ title = 'Processing...', message = 'Please wait.' }) => (
+  <div className="py-14 text-center">
+    <div className="mx-auto mb-6 h-16 w-16 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
+    <h3 className="mb-2 text-xl font-black text-slate-900">{title}</h3>
+    <p className="font-medium text-slate-400">{message}</p>
+  </div>
+);
+
+const Success = ({ amount, label, newBalance, onReset }) => (
+  <div className="py-10 text-center">
+    <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100">
       <CheckCircle size={40} className="text-emerald-500" />
     </div>
-    <h3 className="text-2xl font-black text-slate-900 mb-2">Success! 🎉</h3>
-    <p className="text-slate-500 font-medium mb-5">{fmt(amount)} {label}.</p>
+    <h3 className="mb-2 text-2xl font-black text-slate-900">Success</h3>
+    <p className="mb-5 font-medium text-slate-500">
+      {formatCurrency(amount)} {label}.
+    </p>
     {newBalance != null && (
-      <div className="bg-emerald-50 border border-emerald-100 rounded-2xl px-6 py-4 mb-7 inline-block">
-        <p className="text-xs text-emerald-600 font-bold uppercase tracking-wider mb-1">New Wallet Balance</p>
-        <p className="text-3xl font-black text-emerald-700">{fmt(newBalance)}</p>
+      <div className="mb-7 inline-block rounded-2xl border border-emerald-100 bg-emerald-50 px-6 py-4">
+        <p className="mb-1 text-xs font-bold uppercase tracking-wider text-emerald-600">New Wallet Balance</p>
+        <p className="text-3xl font-black text-emerald-700">{formatCurrency(newBalance)}</p>
       </div>
     )}
-    <div className="flex gap-3 max-w-sm mx-auto">
-      <button onClick={onAgain} className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold transition-all">
-        Do it again
-      </button>
-      <button onClick={onBack} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold transition-all">
-        Go Back
-      </button>
-    </div>
+    <button onClick={onReset} className="rounded-xl bg-emerald-500 px-8 py-3 font-bold text-white transition hover:bg-emerald-600">
+      Continue
+    </button>
   </div>
 );
 
-// ── Stage: Error ────────────────────────────────────────────────────────────
-const ErrorState = ({ msg, onRetry }) => (
-  <div className="text-center py-10">
-    <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-5">
+const ErrorState = ({ message, onRetry }) => (
+  <div className="py-10 text-center">
+    <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-red-100">
       <AlertTriangle size={40} className="text-red-500" />
     </div>
-    <h3 className="text-2xl font-black text-slate-900 mb-2">Failed</h3>
-    <p className="text-slate-400 font-medium mb-7">{msg || 'Something went wrong. Please try again.'}</p>
-    <button onClick={onRetry} className="px-8 py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all">
+    <h3 className="mb-2 text-2xl font-black text-slate-900">Failed</h3>
+    <p className="mb-7 font-medium text-slate-400">{message || 'Something went wrong.'}</p>
+    <button onClick={onRetry} className="rounded-xl bg-slate-900 px-8 py-3 font-bold text-white transition hover:bg-slate-800">
       Try Again
     </button>
   </div>
 );
 
-// ═══════════════════════════════════════════════════════════════════════════
-// TAB 1 — FUND WALLET (simulated card payment → tops up balance)
-// ═══════════════════════════════════════════════════════════════════════════
-const FundTab = ({ onSuccess, userId }) => {
+const FundTab = ({ onSuccess, callbackReference, clearCallbackReference }) => {
   const [amount, setAmount] = useState('');
-  const [cardIdx, setCardIdx] = useState(0);
-  const [stage, setStage] = useState('form'); // form | processing | success | error
+  const [paymentMethod, setPaymentMethod] = useState('bank_transfer');
+  const [stage, setStage] = useState('form');
   const [newBalance, setNewBalance] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [settledAmount, setSettledAmount] = useState(null);
+  const [settledMethod, setSettledMethod] = useState('bank_transfer');
 
-  const handleFund = async () => {
-    if (!amount || Number(amount) <= 0) return;
-    setStage('processing');
-    await new Promise(r => setTimeout(r, 2500)); // simulate gateway
-    try {
-      const res = await fetch(`${API}/wallet/fund`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, amount: Number(amount), description: 'Simulated card top-up' }),
-      });
-      const data = await res.json();
-      if (res.ok) {
+  useEffect(() => {
+    if (!callbackReference) {
+      return undefined;
+    }
+
+    let active = true;
+
+    const verifyPayment = async () => {
+      setStage('processing');
+      setErrorMessage('');
+      try {
+        const data = await apiFetch(`/wallet/paystack/verify?reference=${encodeURIComponent(callbackReference)}`);
+        if (!active) {
+          return;
+        }
+        setSettledAmount(data.amount_added);
+        setSettledMethod(data.payment_method);
         setNewBalance(data.new_balance);
         setStage('success');
-        onSuccess(); // refresh wallet balance in parent
-      } else {
+        onSuccess();
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+        setErrorMessage(error.message);
         setStage('error');
+      } finally {
+        if (active) {
+          clearCallbackReference();
+        }
       }
-    } catch {
+    };
+
+    verifyPayment();
+
+    return () => {
+      active = false;
+    };
+  }, [callbackReference, clearCallbackReference, onSuccess]);
+
+  const handleFund = async () => {
+    if (!amount || Number(amount) <= 0 || !paymentMethod) return;
+    setStage('processing');
+    setErrorMessage('');
+
+    try {
+      const callbackUrl = `${window.location.origin}/fund-wallet`;
+      const data = await apiFetch('/wallet/paystack/initialize', {
+        method: 'POST',
+        body: JSON.stringify({
+          amount: Number(amount),
+          payment_method: paymentMethod,
+          callback_url: callbackUrl,
+        }),
+      });
+
+      if (!data.authorization_url) {
+        throw new Error('Paystack did not return an authorization URL.');
+      }
+
+      window.location.assign(data.authorization_url);
+    } catch (error) {
+      setErrorMessage(error.message);
       setStage('error');
     }
   };
 
-  if (stage === 'processing') return <Processing />;
-  if (stage === 'success') return (
-    <Success
-      amount={amount} label="added to your wallet" newBalance={newBalance}
-      onAgain={() => { setStage('form'); setAmount(''); }}
-      onBack={() => { setStage('form'); setAmount(''); }}
-    />
-  );
-  if (stage === 'error') return <ErrorState onRetry={() => setStage('form')} />;
+  if (stage === 'processing') {
+    return (
+      <Processing
+        title={callbackReference ? 'Verifying payment...' : 'Redirecting to Paystack...'}
+        message={callbackReference ? 'Please wait while we confirm the payment and credit your wallet.' : 'Please complete the checkout on Paystack.'}
+      />
+    );
+  }
+  if (stage === 'success') {
+    return (
+      <Success
+        amount={settledAmount ?? amount}
+        label={`added to your wallet through ${paymentMethodLabel(settledMethod || paymentMethod)}`}
+        newBalance={newBalance}
+        onReset={() => {
+          setAmount('');
+          setPaymentMethod('bank_transfer');
+          setSettledAmount(null);
+          setSettledMethod('bank_transfer');
+          setStage('form');
+        }}
+      />
+    );
+  }
+  if (stage === 'error') {
+    return <ErrorState message={errorMessage} onRetry={() => setStage('form')} />;
+  }
 
   return (
     <div className="space-y-6">
-      {/* Info banner */}
-      <div className="flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-2xl px-5 py-4">
-        <Zap size={18} className="text-blue-600 flex-shrink-0 mt-0.5" />
-        <p className="text-sm text-blue-700 font-semibold">
-          Add money to your wallet using your debit card. You can then use your balance to pay group contributions or repay loans.
+      <div className="flex items-start gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4">
+        <Zap size={18} className="mt-0.5 flex-shrink-0 text-blue-600" />
+        <p className="text-sm font-semibold text-blue-700">
+          Choose a payment method, continue to Paystack checkout, then return here after successful payment to credit the wallet.
         </p>
       </div>
-
-      {/* Demo cards */}
-      <div>
-        <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Select Card (Demo)</label>
-        <div className="space-y-2">
-          {DEMO_CARDS.map((c, i) => (
-            <button key={i} onClick={() => setCardIdx(i)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 transition-all text-left ${
-                cardIdx === i ? 'border-emerald-500 bg-emerald-50' : 'border-slate-100 hover:border-slate-200'
-              }`}>
-              <CreditCard size={16} className={cardIdx === i ? 'text-emerald-600' : 'text-slate-400'} />
-              <div>
-                <p className="text-xs font-black text-slate-800 font-mono">{c.number}</p>
-                <p className="text-[10px] text-slate-400">{c.bank} · {c.type}</p>
-              </div>
-              {cardIdx === i && <CheckCircle size={14} className="ml-auto text-emerald-500" />}
-            </button>
-          ))}
-        </div>
-        <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 mt-2 font-semibold">
-          ⚠️ Demo mode — no real money moves.
-        </p>
+      <PaymentMethodPicker selected={paymentMethod} onSelect={setPaymentMethod} />
+      <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Selected Method</p>
+        <p className="mt-1 text-sm font-black text-slate-900">{paymentMethodLabel(paymentMethod)}</p>
       </div>
-
       <AmountPicker amount={amount} setAmount={setAmount} />
-
-      <button onClick={handleFund} disabled={!amount || Number(amount) <= 0}
-        className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white py-4 rounded-2xl font-black text-lg flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/25">
+      <button
+        onClick={handleFund}
+        disabled={!amount || Number(amount) <= 0 || !paymentMethod}
+        className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-4 text-lg font-black text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600 disabled:opacity-40"
+      >
         <PiggyBank size={20} />
-        Fund {amount ? fmt(amount) : 'Wallet'}
+        Continue to Paystack for {amount ? formatCurrency(amount) : 'wallet funding'}
       </button>
     </div>
   );
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
-// TAB 2 — MAKE PAYMENT (deducts from wallet balance)
-// ═══════════════════════════════════════════════════════════════════════════
-const PayTab = ({ wallet, onSuccess, userId }) => {
-  const [payType, setPayType] = useState('contribution'); // contribution | loan_repayment
+const PayTab = ({ wallet, onSuccess, preferredType }) => {
+  const [payType, setPayType] = useState('savings');
   const [amount, setAmount] = useState('');
-  const [groups, setGroups] = useState([]);
-  const [selectedGroup, setSelectedGroup] = useState('');
+  const [membership, setMembership] = useState(null);
   const [loans, setLoans] = useState([]);
   const [selectedLoan, setSelectedLoan] = useState('');
   const [stage, setStage] = useState('form');
   const [newBalance, setNewBalance] = useState(null);
-  const [errMsg, setErrMsg] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
-    fetch(`${API}/groups`).then(r => r.json()).then(setGroups).catch(() => {});
-    fetch(`${API}/loans?user_id=${userId}`).then(r => r.json())
-      .then(data => setLoans(Array.isArray(data) ? data.filter(l => l.status !== 'completed') : []))
+    apiFetch('/groups/my-membership')
+      .then((response) => setMembership(response.membership))
       .catch(() => {});
-  }, [userId]);
+    apiFetch('/loans')
+      .then((data) => setLoans(Array.isArray(data) ? data.filter((loan) => ['active', 'overdue'].includes(loan.status)) : []))
+      .catch(() => {});
+  }, []);
 
-  const canPay = amount && Number(amount) > 0 &&
-    (payType === 'contribution' ? !!selectedGroup : !!selectedLoan);
+  useEffect(() => {
+    if (preferredType === 'savings' || preferredType === 'loan_repayment') {
+      setPayType(preferredType);
+    }
+  }, [preferredType]);
+
+  const canPay =
+    amount &&
+    Number(amount) > 0 &&
+    (payType === 'savings' ? Boolean(membership?.group_id) : Boolean(selectedLoan));
   const insufficient = wallet && Number(amount) > 0 && Number(amount) > wallet.balance;
 
-  const handlePay = async () => {
+  const handlePayment = async () => {
     if (!canPay || insufficient) return;
     setStage('processing');
-    await new Promise(r => setTimeout(r, 1800));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     try {
-      const loanObj = loans.find(l => l.id === Number(selectedLoan));
-      const body = payType === 'contribution'
-        ? { user_id: userId, amount: Number(amount), type: 'contribution', group_id: Number(selectedGroup), description: 'Group contribution' }
-        : { user_id: userId, amount: Number(amount), type: 'loan_repayment', group_id: Number(loanObj?.group_id || 1), loan_id: Number(selectedLoan), description: 'Loan repayment' };
+      const selectedLoanRecord = loans.find((loan) => loan.id === Number(selectedLoan));
+      const payload =
+        payType === 'savings'
+          ? {
+              amount: Number(amount),
+              type: 'savings',
+              group_id: Number(membership.group_id),
+              description: 'Savings payment',
+            }
+          : {
+              amount: Number(amount),
+              type: 'loan_repayment',
+              group_id: Number(selectedLoanRecord?.group_id),
+              loan_id: Number(selectedLoan),
+              description: 'Loan repayment',
+            };
 
-      const res = await fetch(`${API}/wallet/pay`, {
+      const data = await apiFetch('/wallet/pay', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (res.ok) {
-        setNewBalance(data.new_balance);
-        setStage('success');
-        onSuccess();
-      } else {
-        setErrMsg(data.detail || 'Payment failed.');
-        setStage('error');
-      }
-    } catch {
-      setErrMsg('Network error. Make sure the backend is running.');
+      setNewBalance(data.new_balance);
+      setStage('success');
+      onSuccess();
+    } catch (error) {
+      setErrorMessage(error.message);
       setStage('error');
     }
   };
 
-  const payLabel = payType === 'contribution' ? 'paid as group contribution' : 'applied to your loan';
-
   if (stage === 'processing') return <Processing />;
-  if (stage === 'success') return (
-    <Success
-      amount={amount} label={payLabel} newBalance={newBalance}
-      onAgain={() => { setStage('form'); setAmount(''); }}
-      onBack={() => { setStage('form'); setAmount(''); }}
-    />
-  );
-  if (stage === 'error') return <ErrorState msg={errMsg} onRetry={() => setStage('form')} />;
+  if (stage === 'success') {
+    return (
+      <Success
+        amount={amount}
+        label={payType === 'savings' ? 'paid into savings' : 'applied to your loan'}
+        newBalance={newBalance}
+        onReset={() => {
+          setAmount('');
+          setSelectedLoan('');
+          setStage('form');
+        }}
+      />
+    );
+  }
+  if (stage === 'error') return <ErrorState message={errorMessage} onRetry={() => setStage('form')} />;
 
   return (
     <div className="space-y-6">
-      {/* Wallet balance check */}
       {wallet && (
-        <div className={`flex items-center justify-between rounded-2xl px-5 py-3 border ${
-          wallet.balance > 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'
-        }`}>
+        <div className={`flex items-center justify-between rounded-2xl border px-5 py-3 ${wallet.balance > 0 ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-amber-50'}`}>
           <div>
             <p className="text-xs font-black uppercase tracking-wider text-slate-500">Available Wallet Balance</p>
-            <p className={`text-2xl font-black ${wallet.balance > 0 ? 'text-emerald-700' : 'text-amber-600'}`}>{fmt(wallet.balance)}</p>
+            <p className={`text-2xl font-black ${wallet.balance > 0 ? 'text-emerald-700' : 'text-amber-600'}`}>{formatCurrency(wallet.balance)}</p>
           </div>
-          {wallet.balance === 0 && (
-            <p className="text-xs font-bold text-amber-600 bg-white border border-amber-200 rounded-xl px-3 py-2">Fund wallet first →</p>
-          )}
+          {wallet.balance === 0 && <p className="rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs font-bold text-amber-600">Fund wallet first</p>}
         </div>
       )}
 
-      {/* Payment type toggle */}
       <div>
-        <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Pay For</label>
+        <label className="mb-2 block text-xs font-black uppercase tracking-widest text-slate-500">Pay For</label>
         <div className="grid grid-cols-2 gap-3">
           {[
-            { value: 'contribution',   icon: '🏦', label: 'Group Contribution', desc: 'Pay monthly/weekly dues' },
-            { value: 'loan_repayment', icon: '📋', label: 'Loan Repayment',     desc: 'Pay back a group loan'  },
-          ].map(opt => (
-            <button key={opt.value} onClick={() => { setPayType(opt.value); setSelectedGroup(''); setSelectedLoan(''); }}
-              className={`p-4 rounded-2xl border-2 text-left transition-all ${
-                payType === opt.value ? 'border-emerald-500 bg-emerald-50' : 'border-slate-100 hover:border-slate-200 bg-white'
-              }`}>
-              <p className="text-xl mb-1">{opt.icon}</p>
-              <p className="text-sm font-black text-slate-800">{opt.label}</p>
-              <p className="text-[11px] text-slate-400 mt-0.5">{opt.desc}</p>
+            { value: 'savings', label: 'Savings Payment', icon: 'S' },
+            { value: 'loan_repayment', label: 'Loan Repayment', icon: 'L' },
+          ].map((option) => (
+            <button
+              key={option.value}
+              onClick={() => {
+                setPayType(option.value);
+                setSelectedLoan('');
+              }}
+              className={`rounded-2xl border-2 p-4 text-left transition ${payType === option.value ? 'border-emerald-500 bg-emerald-50' : 'border-slate-100 bg-white hover:border-slate-200'}`}
+            >
+              <p className="mb-1 text-xl">{option.icon}</p>
+              <p className="text-sm font-black text-slate-800">{option.label}</p>
             </button>
           ))}
         </div>
       </div>
 
-      {/* Conditional selector */}
-      {payType === 'contribution' && (
-        <div>
-          <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Select Group</label>
-          {groups.length === 0
-            ? <p className="text-sm text-slate-400 font-medium">No groups found.</p>
-            : <select value={selectedGroup} onChange={e => setSelectedGroup(e.target.value)}
-                className="w-full px-4 py-3 border-2 border-slate-100 rounded-xl focus:border-emerald-500 outline-none text-sm font-semibold bg-white">
-                <option value="">Choose a group…</option>
-                {groups.map(g => <option key={g.id} value={g.id}>{g.name} — contribution {fmt(g.contribution_amount)}/{g.contribution_period}</option>)}
-              </select>
-          }
-          {selectedGroup && (
+      {payType === 'savings' && (
+        <div className="rounded-2xl bg-slate-50 px-4 py-3">
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Savings Target</p>
+          <p className="mt-1 text-sm font-black text-slate-900">
+            {membership?.group_name || 'No approved group'}
+          </p>
+          {membership && (
             <button
-              onClick={() => {
-                const g = groups.find(gr => gr.id === Number(selectedGroup));
-                if (g) setAmount(String(g.contribution_amount));
-              }}
-              className="mt-2 text-xs font-bold text-emerald-600 hover:underline">
-              ↑ Auto-fill contribution amount
+              onClick={() => apiFetch('/groups/my-membership').then((response) => setAmount(String(response.group?.savings_amount || ''))).catch(() => {})}
+              className="mt-2 text-xs font-bold text-emerald-600 hover:underline"
+            >
+              Auto-fill group savings amount
             </button>
           )}
         </div>
@@ -334,152 +424,160 @@ const PayTab = ({ wallet, onSuccess, userId }) => {
 
       {payType === 'loan_repayment' && (
         <div>
-          <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Select Loan</label>
-          {loans.length === 0
-            ? <p className="text-sm text-slate-400 font-medium">No active loans found for your account.</p>
-            : <select value={selectedLoan} onChange={e => setSelectedLoan(e.target.value)}
-                className="w-full px-4 py-3 border-2 border-slate-100 rounded-xl focus:border-emerald-500 outline-none text-sm font-semibold bg-white">
-                <option value="">Choose a loan…</option>
-                {loans.map(l => (
-                  <option key={l.id} value={l.id}>
-                    {l.purpose || 'Loan'} [{l.borrower_name}] — {fmt(l.amount - l.amount_repaid)} remaining ({l.status})
-                  </option>
-                ))}
-              </select>
-          }
-          {selectedLoan && (
-            <button
-              onClick={() => {
-                const l = loans.find(ln => ln.id === Number(selectedLoan));
-                if (l) setAmount(String(l.amount - l.amount_repaid));
-              }}
-              className="mt-2 text-xs font-bold text-emerald-600 hover:underline">
-              ↑ Auto-fill remaining balance
-            </button>
+          <label className="mb-2 block text-xs font-black uppercase tracking-widest text-slate-500">Select Loan</label>
+          {loans.length === 0 ? (
+            <p className="text-sm font-medium text-slate-400">No repayable loans found.</p>
+          ) : (
+            <select
+              value={selectedLoan}
+              onChange={(event) => setSelectedLoan(event.target.value)}
+              className="w-full rounded-xl border-2 border-slate-100 bg-white px-4 py-3 text-sm font-semibold outline-none focus:border-emerald-500"
+            >
+              <option value="">Choose a loan...</option>
+              {loans.map((loan) => (
+                <option key={loan.id} value={loan.id}>
+                  {loan.purpose || 'Loan'} - {formatCurrency(loan.remaining_balance)} remaining
+                </option>
+              ))}
+            </select>
           )}
         </div>
       )}
 
       <AmountPicker amount={amount} setAmount={setAmount} />
 
-      {/* Insufficient balance warning */}
       {insufficient && (
-        <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
-          <AlertTriangle size={15} className="text-red-500 flex-shrink-0" />
+        <div className="flex items-center gap-2 rounded-xl border border-red-100 bg-red-50 px-4 py-3">
+          <AlertTriangle size={15} className="flex-shrink-0 text-red-500" />
           <p className="text-sm font-bold text-red-600">
-            Insufficient balance. You have {fmt(wallet.balance)} but need {fmt(amount)}. Fund your wallet first.
+            Insufficient balance. You have {formatCurrency(wallet.balance)} but need {formatCurrency(amount)}.
           </p>
         </div>
       )}
 
-      <button onClick={handlePay}
+      <button
+        onClick={handlePayment}
         disabled={!canPay || insufficient || wallet?.balance === 0}
-        className="w-full bg-blue-700 hover:bg-blue-800 disabled:opacity-40 text-white py-4 rounded-2xl font-black text-lg flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-700/25">
+        className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-700 py-4 text-lg font-black text-white shadow-lg shadow-blue-700/25 transition hover:bg-blue-800 disabled:opacity-40"
+      >
         <Banknote size={20} />
-        Pay {amount ? fmt(amount) : 'Now'} from Wallet
+        Pay {amount ? formatCurrency(amount) : 'Now'} from Wallet
       </button>
     </div>
   );
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
-// MAIN PAGE
-// ═══════════════════════════════════════════════════════════════════════════
 const FundWallet = () => {
-  const [activeTab, setActiveTab] = useState('fund'); // fund | pay
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState('fund');
   const [wallet, setWallet] = useState(null);
-  const userId = Number(localStorage.getItem('user_id')) || 1;
+  const preferredType = searchParams.get('type');
+  const callbackReference = searchParams.get('reference') || searchParams.get('trxref');
 
   const loadWallet = async () => {
-    const w = await fetch(`${API}/wallet/${userId}`).then(r => r.json()).catch(() => null);
-    setWallet(w);
+    const data = await apiFetch('/wallet/me').catch(() => null);
+    setWallet(data);
   };
 
-  useEffect(() => { loadWallet(); }, []);
+  const clearCallbackReference = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('reference');
+    next.delete('trxref');
+    setSearchParams(next, { replace: true });
+  };
+
+  useEffect(() => {
+    loadWallet();
+  }, []);
+
+  useEffect(() => {
+    const action = searchParams.get('action');
+    if (action === 'pay') {
+      setActiveTab('pay');
+      const next = new URLSearchParams(searchParams);
+      next.delete('action');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (callbackReference) {
+      setActiveTab('fund');
+    }
+  }, [callbackReference]);
 
   return (
     <DashboardLayout>
-      <div className="px-4 md:px-8 py-8 max-w-5xl mx-auto">
-
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+      <div className="mx-auto max-w-5xl px-4 py-8 md:px-8">
+        <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-black text-slate-900">Wallet & Payments</h1>
-            <p className="text-slate-500 font-medium mt-1">Fund your wallet, then use it to pay contributions or repay loans.</p>
+            <h1 className="text-3xl font-black text-slate-900">Wallet and Payments</h1>
+            <p className="mt-1 font-medium text-slate-500">Fund your wallet through Paystack, then pay savings or loan repayments from your balance.</p>
           </div>
-          <button onClick={loadWallet} className="p-2.5 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 shadow-sm">
+          <button onClick={loadWallet} className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm transition hover:bg-slate-50">
             <RefreshCw size={16} className="text-slate-500" />
           </button>
         </div>
 
-        <div className="grid lg:grid-cols-5 gap-6">
-
-          {/* Left: Balance + how it works */}
-          <div className="lg:col-span-2 space-y-4">
+        <div className="grid gap-6 lg:grid-cols-5">
+          <div className="space-y-4 lg:col-span-2">
             <BalanceCard wallet={wallet} />
-
-            {/* How it works card */}
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-              <p className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4">How It Works</p>
+            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+              <p className="mb-4 text-xs font-black uppercase tracking-widest text-slate-500">How It Works</p>
               <div className="space-y-3">
                 {[
-                  { step: '1', label: 'Fund Wallet', desc: 'Add money using your debit card (simulated)', active: activeTab === 'fund' },
-                  { step: '2', label: 'Make Payment', desc: 'Pay contributions or repay loans from balance', active: activeTab === 'pay' },
-                ].map(s => (
-                  <button key={s.step} onClick={() => setActiveTab(s.step === '1' ? 'fund' : 'pay')}
-                    className={`w-full flex items-start gap-3 rounded-xl p-3 text-left transition-all border-2 ${
-                      s.active ? 'border-emerald-500 bg-emerald-50' : 'border-transparent hover:bg-slate-50'
-                    }`}>
-                    <span className={`w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center text-xs font-black ${
-                      s.active ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-600'
-                    }`}>{s.step}</span>
+                  { step: '1', label: 'Choose payment method', desc: 'Select bank transfer, card, or USSD' },
+                  { step: '2', label: 'Complete Paystack checkout', desc: 'Finish the payment securely on Paystack' },
+                  { step: '3', label: 'Wallet gets credited', desc: 'Return here, verify the payment, then spend from wallet balance' },
+                ].map((item) => (
+                  <div key={item.step} className="flex items-start gap-3 rounded-xl border-2 border-transparent p-3 hover:bg-slate-50">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-200 text-xs font-black text-slate-600">{item.step}</span>
                     <div>
-                      <p className="text-sm font-black text-slate-800">{s.label}</p>
-                      <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">{s.desc}</p>
+                      <p className="text-sm font-black text-slate-800">{item.label}</p>
+                      <p className="text-[11px] text-slate-400">{item.desc}</p>
                     </div>
-                  </button>
+                  </div>
                 ))}
               </div>
-              <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-100">
+              <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-4">
                 <ArrowRight size={13} className="text-emerald-500" />
-                <p className="text-[11px] text-slate-400 font-medium">
-                  Fund first → then pay. Your balance shows in real-time.
-                </p>
+                <p className="text-[11px] font-medium text-slate-400">Only verified Paystack payments increase the wallet balance.</p>
               </div>
             </div>
           </div>
 
-          {/* Right: Tab content */}
           <div className="lg:col-span-3">
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-              {/* Tab switcher */}
+            <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
               <div className="grid grid-cols-2 border-b border-slate-100">
-                <button onClick={() => setActiveTab('fund')}
-                  className={`py-4 text-sm font-black transition-all ${
-                    activeTab === 'fund'
-                      ? 'bg-emerald-500 text-white'
-                      : 'text-slate-500 hover:bg-slate-50'
-                  }`}>
-                  <PiggyBank size={16} className="inline mr-2" />
+                <button
+                  onClick={() => setActiveTab('fund')}
+                  className={`py-4 text-sm font-black transition ${activeTab === 'fund' ? 'bg-emerald-500 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                >
+                  <PiggyBank size={16} className="mr-2 inline" />
                   Fund Wallet
                 </button>
-                <button onClick={() => setActiveTab('pay')}
-                  className={`py-4 text-sm font-black transition-all ${
-                    activeTab === 'pay'
-                      ? 'bg-blue-700 text-white'
-                      : 'text-slate-500 hover:bg-slate-50'
-                  }`}>
-                  <Banknote size={16} className="inline mr-2" />
+                <button
+                  onClick={() => setActiveTab('pay')}
+                  className={`py-4 text-sm font-black transition ${activeTab === 'pay' ? 'bg-blue-700 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                >
+                  <Banknote size={16} className="mr-2 inline" />
                   Make Payment
                 </button>
               </div>
-
-              {/* Tab body */}
               <div className="p-7">
-                {activeTab === 'fund'
-                  ? <FundTab userId={userId} onSuccess={loadWallet} />
-                  : <PayTab userId={userId} wallet={wallet} onSuccess={loadWallet} />
-                }
+                {activeTab === 'fund' ? (
+                  <FundTab
+                    onSuccess={loadWallet}
+                    callbackReference={callbackReference}
+                    clearCallbackReference={clearCallbackReference}
+                  />
+                ) : (
+                  <PayTab
+                    wallet={wallet}
+                    onSuccess={loadWallet}
+                    preferredType={preferredType}
+                  />
+                )}
               </div>
             </div>
           </div>
@@ -490,4 +588,3 @@ const FundWallet = () => {
 };
 
 export default FundWallet;
-

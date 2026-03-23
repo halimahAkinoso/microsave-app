@@ -4,7 +4,13 @@ sqlalchemy
 psycopg2-binary
 python-jose
 passlib[bcrypt]
+bcrypt==4.0.1
+python-multipart
+email-validator
 langchain
 chromadb
 openai
 python-dotenv
+
+requests
+alembic

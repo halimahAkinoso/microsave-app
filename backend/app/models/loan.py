@@ -11,5 +11,5 @@ class Loan(Base):
     amount = Column(Float, nullable=False)
     amount_repaid = Column(Float, default=0.0)
     purpose = Column(String)
-    status = Column(String, default="pending")  # pending / active / overdue / completed
+    status = Column(String, default="pending")  # pending / active / overdue / completed / declined
     created_at = Column(DateTime, default=func.now())

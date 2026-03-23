@@ -1,301 +1,392 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
 from app.database import get_db
-from app.models.user import User
-from app.models.group_member import GroupMember
 from app.models.group import Group
+from app.models.group_member import GroupMember
 from app.models.loan import Loan
 from app.models.transaction import Transaction
+from app.models.user import User
 from app.models.wallet import Wallet
+from app.services.auth_service import get_current_user
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
 
 
 class ChatRequest(BaseModel):
-    user_id: int
     message: str
 
 
-def get_user_context(user_id: int, db: Session) -> dict:
-    """Fetch all relevant data for a user to power smart responses."""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        return {}
+def format_money(amount: float) -> str:
+    return f"NGN {amount:,.0f}"
 
-    # Membership
-    memberships = db.query(GroupMember).filter(
-        GroupMember.user_id == user_id,
-        GroupMember.join_status == "approved"
-    ).all()
 
-    groups_info = []
-    for m in memberships:
-        group = db.query(Group).filter(Group.id == m.group_id).first()
-        if group:
-            groups_info.append({
-                "id": group.id,
-                "name": group.name,
-                "balance": group.balance,
-                "contribution_amount": group.contribution_amount,
-                "contribution_period": group.contribution_period,
-                "role": m.role,
-                "is_admin": m.role == "admin",
-            })
-
-    # Loans
-    loans = db.query(Loan).filter(Loan.user_id == user_id).all()
-    loans_info = []
-    for l in loans:
-        group = db.query(Group).filter(Group.id == l.group_id).first()
-        loans_info.append({
-            "id": l.id,
-            "amount": l.amount,
-            "amount_repaid": l.amount_repaid,
-            "remaining": l.amount - l.amount_repaid,
-            "purpose": l.purpose,
-            "status": l.status,
-            "group_name": group.name if group else "Unknown",
-            "progress": round((l.amount_repaid / l.amount * 100)) if l.amount > 0 else 0,
-        })
-
-    # Wallet
-    wallet = db.query(Wallet).filter(Wallet.user_id == user_id).first()
-    wallet_balance = wallet.balance if wallet else 0.0
-
-    # Recent transactions (last 5)
-    recent_txns = db.query(Transaction).filter(
-        Transaction.user_id == user_id
-    ).order_by(Transaction.created_at.desc()).limit(5).all()
-
-    txns_info = []
-    for t in recent_txns:
-        group = db.query(Group).filter(Group.id == t.group_id).first()
-        txns_info.append({
-            "amount": t.amount,
-            "type": t.type,
-            "description": t.description,
-            "group_name": group.name if group else "Unknown",
-        })
-
-    # Pending join requests
-    pending = db.query(GroupMember).filter(
-        GroupMember.user_id == user_id,
-        GroupMember.join_status == "pending"
-    ).all()
-
+def _loan_progress_payload(loan: Loan) -> dict:
+    repayment_progress = round((loan.amount_repaid / loan.amount) * 100) if loan.amount > 0 else 0
     return {
-        "name": user.name,
-        "email": user.email,
-        "groups": groups_info,
-        "loans": loans_info,
-        "wallet_balance": wallet_balance,
-        "recent_transactions": txns_info,
-        "pending_joins": len(pending),
-        "is_admin_of_any": any(g["is_admin"] for g in groups_info),
+        "amount": loan.amount,
+        "amount_repaid": loan.amount_repaid,
+        "remaining_balance": max(loan.amount - loan.amount_repaid, 0.0),
+        "repayment_progress": repayment_progress,
+        "purpose": loan.purpose,
+        "status": loan.status,
     }
 
 
-def fmt_naira(amount: float) -> str:
-    return f"₦{amount:,.0f}"
+def get_user_context(user_id: int, db: Session) -> dict:
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        return {}
+
+    membership = (
+        db.query(GroupMember)
+        .filter(
+            GroupMember.user_id == user_id,
+            GroupMember.join_status == "approved",
+        )
+        .first()
+    )
+    user_pending_membership_count = (
+        db.query(GroupMember)
+        .filter(
+            GroupMember.user_id == user_id,
+            GroupMember.join_status == "pending",
+        )
+        .count()
+    )
+
+    group = db.query(Group).filter(Group.id == membership.group_id).first() if membership else None
+    wallet = db.query(Wallet).filter(Wallet.user_id == user_id).first()
+    loans = db.query(Loan).filter(Loan.user_id == user_id).all()
+
+    if membership and membership.role == "admin" and group is not None:
+        transaction_rows = (
+            db.query(Transaction)
+            .filter(Transaction.group_id == group.id)
+            .order_by(Transaction.created_at.desc())
+            .limit(5)
+            .all()
+        )
+        recent_transactions = []
+        for transaction in transaction_rows:
+            actor = db.query(User).filter(User.id == transaction.user_id).first()
+            recent_transactions.append(
+                {
+                    "description": transaction.description or transaction.type,
+                    "amount": transaction.amount,
+                    "actor_name": actor.name if actor else "Unknown",
+                }
+            )
+    else:
+        recent_transactions = [
+            {
+                "description": transaction.description or transaction.type,
+                "amount": transaction.amount,
+            }
+            for transaction in db.query(Transaction)
+            .filter(Transaction.user_id == user_id)
+            .order_by(Transaction.created_at.desc())
+            .limit(5)
+            .all()
+        ]
+
+    total_savings = sum(
+        transaction.amount
+        for transaction in db.query(Transaction)
+        .filter(
+            Transaction.user_id == user_id,
+            Transaction.group_id == (group.id if group else -1),
+            Transaction.type.in_(("contribution", "savings")),
+        )
+        .all()
+    )
+
+    active_loan = next((loan for loan in loans if loan.status == "active"), None)
+    outstanding_total = sum(max(loan.amount - loan.amount_repaid, 0.0) for loan in loans)
+
+    group_pending_membership_count = 0
+    group_pending_loan_count = 0
+    member_count = 0
+    group_active_loans = []
+    group_pending_loans = []
+    if membership and group is not None:
+        group_pending_membership_count = (
+            db.query(GroupMember)
+            .filter(
+                GroupMember.group_id == group.id,
+                GroupMember.join_status == "pending",
+            )
+            .count()
+        )
+        group_pending_loan_count = (
+            db.query(Loan)
+            .filter(
+                Loan.group_id == group.id,
+                Loan.status == "pending",
+            )
+            .count()
+        )
+        member_count = (
+            db.query(GroupMember)
+            .filter(
+                GroupMember.group_id == group.id,
+                GroupMember.join_status == "approved",
+            )
+            .count()
+        )
+
+        active_group_loans = (
+            db.query(Loan)
+            .filter(
+                Loan.group_id == group.id,
+                Loan.status == "active",
+            )
+            .order_by(Loan.created_at.desc())
+            .all()
+        )
+        pending_group_loans = (
+            db.query(Loan)
+            .filter(
+                Loan.group_id == group.id,
+                Loan.status == "pending",
+            )
+            .order_by(Loan.created_at.desc())
+            .all()
+        )
+        for loan in active_group_loans:
+            borrower = db.query(User).filter(User.id == loan.user_id).first()
+            group_active_loans.append(
+                {
+                    "borrower_name": borrower.name if borrower else "Unknown",
+                    **_loan_progress_payload(loan),
+                }
+            )
+        for loan in pending_group_loans:
+            borrower = db.query(User).filter(User.id == loan.user_id).first()
+            group_pending_loans.append(
+                {
+                    "borrower_name": borrower.name if borrower else "Unknown",
+                    **_loan_progress_payload(loan),
+                }
+            )
+
+    return {
+        "name": user.name,
+        "membership": {
+            "group_name": group.name if group else None,
+            "group_balance": group.balance if group else 0.0,
+            "role": membership.role if membership else None,
+            "savings_amount": group.savings_amount if group else 0.0,
+            "savings_period": group.savings_period if group else None,
+        }
+        if membership and group
+        else None,
+        "wallet_balance": wallet.balance if wallet else 0.0,
+        "loans": loans,
+        "recent_transactions": recent_transactions,
+        "total_savings": total_savings,
+        "outstanding_total": outstanding_total,
+        "user_pending_membership_count": user_pending_membership_count,
+        "group_pending_membership_count": group_pending_membership_count,
+        "group_pending_loan_count": group_pending_loan_count,
+        "group_active_loans": group_active_loans,
+        "group_pending_loans": group_pending_loans,
+        "member_count": member_count,
+        "active_loan": active_loan,
+    }
 
 
 def generate_response(message: str, ctx: dict) -> str:
-    """Rule-based smart response generator using user context."""
-    msg = message.lower().strip()
-    name = ctx.get("name", "").split()[0] if ctx.get("name") else "there"
-    groups = ctx.get("groups", [])
-    loans = ctx.get("loans", [])
-    wallet_balance = ctx.get("wallet_balance", 0)
-    txns = ctx.get("recent_transactions", [])
+    prompt = message.lower().strip()
+    first_name = ctx.get("name", "there").split()[0]
+    membership = ctx.get("membership")
+    recent_transactions = ctx.get("recent_transactions", [])
+    wallet_balance = ctx.get("wallet_balance", 0.0)
 
-    # ── Greetings ─────────────────────────────────────────────────────────────
-    if any(w in msg for w in ["hello", "hi", "hey", "good morning", "good afternoon", "good evening", "howdy"]):
-        group_line = f"You're a member of **{groups[0]['name']}**." if groups else "You haven't joined a group yet."
-        return (
-            f"Hello {name}! 👋 Welcome to MicroSave. I'm your personal finance assistant.\n\n"
-            f"{group_line} How can I help you today?\n\n"
-            f"You can ask me about your:\n"
-            f"• 💰 Wallet balance & funding\n"
-            f"• 🏦 Loan status & repayment\n"
-            f"• 👥 Group membership & contributions\n"
-            f"• 📊 Transaction history"
-        )
-
-    # ── Wallet / Balance ───────────────────────────────────────────────────────
-    if any(w in msg for w in ["wallet", "balance", "how much do i have", "my balance", "account balance"]):
-        return (
-            f"💰 **Your Wallet Balance**\n\n"
-            f"Current balance: **{fmt_naira(wallet_balance)}**\n\n"
-            f"You can top up your wallet from the **Fund Wallet** page in the sidebar, "
-            f"then use it to pay contributions or repay loans."
-        )
-
-    # ── Loans ──────────────────────────────────────────────────────────────────
-    if any(w in msg for w in ["loan", "borrow", "debt", "owe", "repay", "repayment", "borrowed"]):
-        if not loans:
+    if not membership:
+        pending_count = ctx.get("user_pending_membership_count", 0)
+        if pending_count > 0:
             return (
-                f"📋 You currently have **no loans** on record, {name}.\n\n"
-                f"To request a loan, go to the **Loans** page and click **New Loan**. "
-                f"Your group admin will review and approve it."
+                f"You still have {pending_count} pending group request(s), {first_name}. "
+                "Wait for admin approval before using savings, loan, and repayment features."
             )
-        active_loans = [l for l in loans if l["status"] == "active"]
-        pending_loans = [l for l in loans if l["status"] == "pending"]
-        overdue_loans = [l for l in loans if l["status"] == "overdue"]
-
-        parts = [f"📊 **Your Loan Summary**, {name}:\n"]
-        for l in loans:
-            status_emoji = {"active": "🟢", "pending": "🟡", "overdue": "🔴", "completed": "✅"}.get(l["status"], "⚪")
-            parts.append(
-                f"{status_emoji} **{l['group_name']}** — {fmt_naira(l['amount'])} loan\n"
-                f"   Purpose: {l['purpose'] or 'Not specified'}\n"
-                f"   Repaid: {fmt_naira(l['amount_repaid'])} ({l['progress']}%) · Remaining: {fmt_naira(l['remaining'])}\n"
-                f"   Status: **{l['status'].capitalize()}**"
-            )
-        if overdue_loans:
-            parts.append("\n⚠️ You have overdue loans. Please make a repayment from the **Fund Wallet** page.")
-        elif active_loans:
-            parts.append(f"\n✅ Keep up the repayments! You can pay from your wallet on the **Loans** page.")
-        return "\n\n".join(parts)
-
-    # ── Contribution ───────────────────────────────────────────────────────────
-    if any(w in msg for w in ["contribution", "contribute", "payment", "pay", "dues", "weekly", "monthly"]):
-        if not groups:
+        if "group" in prompt or "loan" in prompt or "contribution" in prompt or "savings" in prompt:
             return (
-                f"You're not in any group yet, {name}. "
-                f"Go to the **Groups** page to request to join one. "
-                f"Your request will be reviewed by the group admin."
+                f"You do not have an approved group yet, {first_name}. "
+                "Join a group before using savings, loan, and repayment features."
             )
-        lines = [f"💳 **Your Group Contributions**, {name}:\n"]
-        for g in groups:
-            period = "week" if g["contribution_period"] == "weekly" else "month"
-            lines.append(
-                f"🏦 **{g['name']}**\n"
-                f"   Contribution: {fmt_naira(g['contribution_amount'])} per {period}\n"
-                f"   Your role: {'👑 Admin' if g['is_admin'] else '👤 Member'}\n"
-                f"   Group pool: {fmt_naira(g['balance'])}"
-            )
-        lines.append("\nTo make a contribution, go to **Fund Wallet → Make Payment**.")
-        return "\n\n".join(lines)
+        return (
+            f"Hello {first_name}. You are not attached to an approved group yet. "
+            "Join a group first, then I can answer questions about savings, loans, and eligibility."
+        )
 
-    # ── Group / Membership ─────────────────────────────────────────────────────
-    if any(w in msg for w in ["group", "member", "membership", "join", "belong", "which group", "my group"]):
-        if not groups:
+    role_label = "admin" if membership["role"] == "admin" else "member"
+    is_admin = membership["role"] == "admin"
+
+    if any(token in prompt for token in ("hello", "hi", "hey")):
+        return (
+            f"Hello {first_name}. You are currently a {role_label} in {membership['group_name']}. "
+            "Ask about your wallet, loans, savings, approvals, or group balance."
+        )
+
+    if is_admin and (
+        "pending membership" in prompt
+        or "membership request" in prompt
+        or "join request" in prompt
+    ):
+        count = ctx.get("group_pending_membership_count", 0)
+        return f"You currently have {count} pending membership request(s) waiting for review in {membership['group_name']}."
+
+    if is_admin and (
+        "pending loan" in prompt
+        or "loan request" in prompt
+        or "loans waiting" in prompt
+    ):
+        count = ctx.get("group_pending_loan_count", 0)
+        if count == 0:
+            return f"You currently have 0 pending loan request(s) waiting for review in {membership['group_name']}."
+        lines = [
+            f"{loan['borrower_name']}: requested {format_money(loan['amount'])} for {loan['purpose'] or 'no stated purpose'}"
+            for loan in ctx.get("group_pending_loans", [])
+        ]
+        return (
+            f"You currently have {count} pending loan request(s) waiting for review in {membership['group_name']}.\n"
+            + "\n".join(lines)
+        )
+
+    if is_admin and (
+        "who is on loan" in prompt
+        or "active loans" in prompt
+        or "members on loan" in prompt
+        or "who still owes" in prompt
+    ):
+        active_group_loans = ctx.get("group_active_loans", [])
+        if not active_group_loans:
+            return f"No member currently has an active loan in {membership['group_name']}."
+        lines = [
+            f"{loan['borrower_name']}: {format_money(loan['remaining_balance'])} remaining, {loan['repayment_progress']}% repaid"
+            for loan in active_group_loans
+        ]
+        return "Members currently on loan:\n" + "\n".join(lines)
+
+    if is_admin and (
+        "repayment progress" in prompt
+        or "loan progress" in prompt
+        or "member by member loan summary" in prompt
+        or "loan summary" in prompt
+    ):
+        active_group_loans = ctx.get("group_active_loans", [])
+        if not active_group_loans:
+            return f"There are no active group loans to summarize in {membership['group_name']}."
+        lines = [
+            f"{loan['borrower_name']}: repaid {format_money(loan['amount_repaid'])} of {format_money(loan['amount'])}, {loan['repayment_progress']}% complete"
+            for loan in active_group_loans
+        ]
+        return "Current repayment progress by borrower:\n" + "\n".join(lines)
+
+    if is_admin and (
+        "overview" in prompt
+        or "summary" in prompt
+        or "admin status" in prompt
+    ):
+        return (
+            f"{membership['group_name']} has {ctx.get('member_count', 0)} approved member(s), "
+            f"{ctx.get('group_pending_membership_count', 0)} pending membership request(s), "
+            f"{ctx.get('group_pending_loan_count', 0)} pending loan request(s), and a current group balance of "
+            f"{format_money(membership['group_balance'])}."
+        )
+
+    if "how much do i still owe" in prompt or "what do i still owe" in prompt or "loan balance" in prompt:
+        if ctx["outstanding_total"] <= 0:
+            return "You do not have any outstanding loan balance right now."
+        return f"You still owe {format_money(ctx['outstanding_total'])} across your current loans."
+
+    if "repayment progress" in prompt or "loan progress" in prompt or "how far along" in prompt:
+        if ctx["active_loan"] is None:
+            return "You do not have an active loan right now, so there is no repayment progress to track."
+        progress = _loan_progress_payload(ctx["active_loan"])
+        return (
+            f"Your active loan is {progress['repayment_progress']}% repaid. "
+            f"You have repaid {format_money(progress['amount_repaid'])} out of {format_money(progress['amount'])}, "
+            f"with {format_money(progress['remaining_balance'])} remaining."
+        )
+
+    if "can i afford a loan" in prompt or "am i eligible" in prompt or "can i borrow" in prompt:
+        if membership["role"] == "admin":
+            return "Admins cannot request loans from the group they manage."
+        if ctx["active_loan"] is not None:
+            remaining = ctx["active_loan"].amount - ctx["active_loan"].amount_repaid
             return (
-                f"👥 You're not a member of any group yet, {name}.\n\n"
-                f"Here's how to join:\n"
-                f"1. Go to the **Groups** page\n"
-                f"2. Find a group you'd like to join\n"
-                f"3. Click **Request to Join**\n"
-                f"4. Wait for the group admin to approve your request\n\n"
-                f"Note: You can only be in **one group** at a time."
+                f"You are not eligible for a new loan because you still have an active loan with "
+                f"{format_money(remaining)} outstanding."
             )
-        lines = [f"👥 **Your Group Membership**, {name}:\n"]
-        for g in groups:
-            lines.append(
-                f"🏦 **{g['name']}**\n"
-                f"   Role: {'👑 Group Admin' if g['is_admin'] else '👤 General Member'}\n"
-                f"   Group Balance: {fmt_naira(g['balance'])}\n"
-                f"   Contribution: {fmt_naira(g['contribution_amount'])}/{g['contribution_period']}"
-            )
-        if ctx.get("is_admin_of_any"):
-            lines.append("\nAs an admin, you can approve/reject join requests on the **Groups** page.")
-        return "\n\n".join(lines)
 
-    # ── Admin ──────────────────────────────────────────────────────────────────
-    if any(w in msg for w in ["admin", "approve", "approve member", "pending request", "join request"]):
-        if ctx.get("is_admin_of_any"):
-            admin_groups = [g for g in groups if g["is_admin"]]
-            group_names = ", ".join(g["name"] for g in admin_groups)
+        max_by_savings = ctx["total_savings"] * 2
+        if max_by_savings <= 0:
             return (
-                f"👑 **Admin Panel**, {name}\n\n"
-                f"You are the admin of: **{group_names}**\n\n"
-                f"As admin you can:\n"
-                f"• ✅ Approve or ❌ reject member join requests\n"
-                f"• 💳 Approve loan applications from members\n"
-                f"• 📊 View all members' transaction history\n"
-                f"• 👥 Manage member roles\n\n"
-                f"Go to the **Groups** page to see pending join requests."
+                "You are not eligible yet because you do not have savings history in the group. "
+                "Build your savings first, then your eligibility can be assessed."
             )
+
+        affordable = min(max_by_savings, membership["group_balance"])
         return (
-            f"You are not currently an admin of any group, {name}. "
-            f"Create a new group on the **Groups** page to become an admin."
+            f"Based on your current savings history, your savings-backed ceiling is about "
+            f"{format_money(max_by_savings)}. "
+            f"The group currently has {format_money(membership['group_balance'])} available, so a practical upper bound is "
+            f"{format_money(affordable)}."
         )
 
-    # ── Transaction history ────────────────────────────────────────────────────
-    if any(w in msg for w in ["transaction", "history", "recent", "statement", "record", "activity"]):
-        if not txns:
-            return f"📋 No transactions found yet, {name}. Start by funding your wallet and making a contribution."
-        lines = [f"📊 **Your Recent Transactions**, {name}:\n"]
-        type_emoji = {"deposit": "⬇️", "withdrawal": "⬆️", "loan": "💳"}
-        for t in txns:
-            emoji = type_emoji.get(t["type"], "💰")
-            lines.append(f"{emoji} {t['description'] or t['type'].capitalize()} — {fmt_naira(t['amount'])} ({t['group_name']})")
-        lines.append("\nView your full history on the **Transactions** page.")
-        return "\n".join(lines)
+    if "wallet" in prompt or "balance" in prompt:
+        return f"Your wallet balance is {format_money(wallet_balance)}."
 
-    # ── How to fund / top up ────────────────────────────────────────────────────
-    if any(w in msg for w in ["fund", "top up", "topup", "add money", "deposit", "recharge"]):
+    if "contribution" in prompt or "dues" in prompt or "savings" in prompt:
         return (
-            f"💳 **How to Fund Your Wallet**, {name}:\n\n"
-            f"1. Click **Fund Wallet** in the sidebar\n"
-            f"2. Enter the amount you want to add\n"
-            f"3. Click **Fund Now** (payment gateway will be integrated soon)\n\n"
-            f"After funding, you can:\n"
-            f"• Pay your group **contribution** directly\n"
-            f"• Make a **loan repayment**\n"
-            f"• Do a **split payment** across multiple purposes\n\n"
-            f"Your current balance is **{fmt_naira(wallet_balance)}**."
+            f"Your group savings target is {format_money(membership['savings_amount'])} per "
+            f"{membership['savings_period']}. "
+            f"You have saved {format_money(ctx['total_savings'])} so far."
         )
 
-    # ── Help / What can you do ─────────────────────────────────────────────────
-    if any(w in msg for w in ["help", "what can you do", "options", "menu", "assist", "support", "?"]):
+    if "group" in prompt or "membership" in prompt:
         return (
-            f"🤖 **MicroSave Assistant — What I Can Help With:**\n\n"
-            f"💰 **Wallet** — Check balance, how to fund it\n"
-            f"🏦 **Loans** — Your loan status, repayment progress, how to apply\n"
-            f"💳 **Contributions** — Your dues, amounts, schedule\n"
-            f"👥 **Groups** — Your membership, how to join, group info\n"
-            f"👑 **Admin** — Approve members, manage your group\n"
-            f"📊 **Transactions** — Recent activity, history\n\n"
-            f"Just ask me anything! For example:\n"
-            f'_"What is my loan balance?"_\n'
-            f'_"How do I fund my wallet?"_\n'
-            f'_"When is my contribution due?"_'
+            f"You are in {membership['group_name']} as a {role_label}. "
+            f"The current group balance is {format_money(membership['group_balance'])}."
         )
 
-    # ── Status ────────────────────────────────────────────────────────────────
-    if any(w in msg for w in ["status", "overview", "summary", "how am i doing", "update"]):
-        group_str = groups[0]["name"] if groups else "No group"
-        active_loan = next((l for l in loans if l["status"] == "active"), None)
-        loan_str = f"{fmt_naira(active_loan['remaining'])} remaining on active loan" if active_loan else "No active loans"
+    if "transaction" in prompt or "recent" in prompt or "history" in prompt:
+        if not recent_transactions:
+            return "You do not have any recent transactions yet."
+        if is_admin:
+            lines = [
+                f"{transaction['actor_name']} - {transaction['description']}: {format_money(transaction['amount'])}"
+                for transaction in recent_transactions
+            ]
+            return "Recent group activity:\n" + "\n".join(lines)
+        lines = [
+            f"{transaction['description']}: {format_money(transaction['amount'])}"
+            for transaction in recent_transactions
+        ]
+        return "Recent activity:\n" + "\n".join(lines)
+
+    if "help" in prompt or "what can you do" in prompt:
         return (
-            f"📋 **Your Account Overview**, {name}:\n\n"
-            f"👤 Name: {ctx.get('name')}\n"
-            f"📧 Email: {ctx.get('email')}\n"
-            f"👥 Group: {group_str}\n"
-            f"💰 Wallet: {fmt_naira(wallet_balance)}\n"
-            f"🏦 Loans: {loan_str}\n\n"
-            f"Is there anything specific you'd like to know more about?"
+            "You can ask me about your wallet balance, savings status, loan eligibility, outstanding debt, "
+            "repayment progress, recent transactions, approvals, or your current group role."
         )
 
-    # ── Default fallback ───────────────────────────────────────────────────────
     return (
-        f"I'm not sure I understood that, {name}. 🤔\n\n"
-        f"Here are some things you can ask me:\n"
-        f"• _\"What is my loan balance?\"_\n"
-        f"• _\"What group am I in?\"_\n"
-        f"• _\"How do I fund my wallet?\"_\n"
-        f"• _\"Show my recent transactions\"_\n"
-        f"• _\"What is my contribution amount?\"_\n\n"
-        f"Type **help** to see all options."
+        f"I can help with your wallet, savings, loans, approvals, repayment progress, and group status, {first_name}. "
+        "Try asking: How far along is my loan repayment? or Give me an overview of the group."
     )
 
 
 @router.post("/chat")
-def chat(data: ChatRequest, db: Session = Depends(get_db)):
-    ctx = get_user_context(data.user_id, db)
-    if not ctx:
-        return {"response": "I couldn't find your account. Please make sure you're logged in."}
-    response = generate_response(data.message, ctx)
-    return {"response": response}
+def chat(
+    data: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    context = get_user_context(current_user.id, db)
+    if not context:
+        return {"response": "I could not load your profile right now."}
+    return {"response": generate_response(data.message, context)}
