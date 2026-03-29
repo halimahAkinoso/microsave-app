@@ -16,10 +16,14 @@ const Chat = () => {
   const [input, setInput] = useState('');
   const [loadingMembership, setLoadingMembership] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const bottomRef = useRef(null);
   const pollRef = useRef(null);
+  const messagesRef = useRef([]);
+  const viewportRef = useRef(null);
+  const stickToBottomRef = useRef(true);
 
   const isApprovedMember = membership?.join_status === 'approved' && group;
   const initials = useMemo(
@@ -33,20 +37,57 @@ const Chat = () => {
     [currentUserName]
   );
 
-  const scrollToBottom = () => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (behavior = 'smooth') => {
+    bottomRef.current?.scrollIntoView({ behavior });
   };
 
-  const loadMessages = async (groupId) => {
-    setLoadingMessages(true);
-    setError('');
+  const mergeMessages = (currentMessages, incomingMessages) => {
+    if (!incomingMessages.length) {
+      return currentMessages;
+    }
+    const merged = [...currentMessages];
+    const existingIds = new Set(currentMessages.map((message) => message.id));
+    incomingMessages.forEach((message) => {
+      if (!existingIds.has(message.id)) {
+        merged.push(message);
+      }
+    });
+    return merged;
+  };
+
+  const loadMessages = async (groupId, { incremental = false, manual = false } = {}) => {
+    if (manual) {
+      setRefreshing(true);
+    } else if (!incremental) {
+      setLoadingMessages(true);
+    }
+    if (!incremental) {
+      setError('');
+    }
+
     try {
-      const data = await apiFetch(`/chat/${groupId}/messages`);
-      setMessages(Array.isArray(data) ? data : []);
+      const latestMessageId = messagesRef.current.at(-1)?.id;
+      const query = incremental && latestMessageId ? `?after_id=${latestMessageId}` : '';
+      const data = await apiFetch(`/chat/${groupId}/messages${query}`);
+      const nextMessages = Array.isArray(data) ? data : [];
+      setMessages((current) => {
+        const updated = incremental ? mergeMessages(current, nextMessages) : nextMessages;
+        messagesRef.current = updated;
+        return updated;
+      });
+      if (!incremental || nextMessages.length > 0) {
+        stickToBottomRef.current = true;
+      }
     } catch (err) {
-      setError(err.message || 'Could not load group messages.');
+      if (!incremental) {
+        setError(err.message || 'Could not load group messages.');
+      }
     } finally {
-      setLoadingMessages(false);
+      if (manual) {
+        setRefreshing(false);
+      } else if (!incremental) {
+        setLoadingMessages(false);
+      }
     }
   };
 
@@ -84,6 +125,7 @@ const Chat = () => {
   useEffect(() => {
     if (!isApprovedMember) {
       setMessages([]);
+      messagesRef.current = [];
       if (pollRef.current) {
         clearInterval(pollRef.current);
       }
@@ -92,7 +134,7 @@ const Chat = () => {
 
     loadMessages(group.id);
     pollRef.current = setInterval(() => {
-      loadMessages(group.id);
+      loadMessages(group.id, { incremental: true });
     }, 4000);
 
     return () => {
@@ -103,8 +145,19 @@ const Chat = () => {
   }, [group?.id, isApprovedMember]);
 
   useEffect(() => {
-    scrollToBottom();
+    if (stickToBottomRef.current) {
+      scrollToBottom(messages.length > 0 ? 'smooth' : 'auto');
+    }
   }, [messages, loadingMessages]);
+
+  const handleViewportScroll = () => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    stickToBottomRef.current = distanceFromBottom < 120;
+  };
 
   const sendMessage = async (event) => {
     event.preventDefault();
@@ -122,7 +175,12 @@ const Chat = () => {
         method: 'POST',
         body: JSON.stringify({ content }),
       });
-      setMessages((current) => [...current, newMessage]);
+      stickToBottomRef.current = true;
+      setMessages((current) => {
+        const updated = mergeMessages(current, [newMessage]);
+        messagesRef.current = updated;
+        return updated;
+      });
     } catch (err) {
       setError(err.message || 'Could not send your message.');
       setInput(content);
@@ -280,10 +338,10 @@ const Chat = () => {
 
                 <button
                   type="button"
-                  onClick={() => loadMessages(group.id)}
+                  onClick={() => loadMessages(group.id, { manual: true })}
                   className="rounded-2xl p-2 text-slate-400 transition hover:bg-emerald-50 hover:text-emerald-600"
                 >
-                  <RefreshCw size={16} />
+                  <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
                 </button>
               </div>
 
@@ -293,7 +351,11 @@ const Chat = () => {
                 </div>
               ) : null}
 
-              <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+              <div
+                ref={viewportRef}
+                onScroll={handleViewportScroll}
+                className="flex-1 overflow-y-auto px-4 py-5 sm:px-6"
+              >
                 {loadingMessages ? (
                   <div className="flex justify-center py-12">
                     <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -9,6 +9,7 @@ from app.models.user import User
 from app.services.auth_service import get_current_user
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+MAX_MESSAGE_LENGTH = 1000
 
 
 class MessageCreate(BaseModel):
@@ -47,16 +48,16 @@ def _serialize_message(message: Message, db: Session) -> dict:
 @router.get("/{group_id}/messages")
 def get_messages(
     group_id: int,
+    after_id: int | None = Query(default=None, ge=0),
+    limit: int = Query(default=200, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_group_membership(db, current_user.id, group_id)
-    messages = (
-        db.query(Message)
-        .filter(Message.group_id == group_id)
-        .order_by(Message.created_at.asc(), Message.id.asc())
-        .all()
-    )
+    query = db.query(Message).filter(Message.group_id == group_id)
+    if after_id is not None:
+        query = query.filter(Message.id > after_id)
+    messages = query.order_by(Message.created_at.asc(), Message.id.asc()).limit(limit).all()
     return [_serialize_message(message, db) for message in messages]
 
 
@@ -71,6 +72,11 @@ def send_message(
     content = data.content.strip()
     if not content:
         raise HTTPException(status_code=400, detail="Message content cannot be empty.")
+    if len(content) > MAX_MESSAGE_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Message is too long. Keep chat messages under {MAX_MESSAGE_LENGTH} characters.",
+        )
 
     message = Message(
         sender_id=current_user.id,

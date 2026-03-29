@@ -2,12 +2,12 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, Mail, User, Phone, Briefcase, Loader2, Wallet } from 'lucide-react';
 import { API_BASE_URL } from '../services/api';
-import { saveSession } from '../hooks/useAuth';
 
 const Register = () => {
   const [form, setForm] = useState({ name: '', email: '', password: '', phone: '', occupation: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const navigate = useNavigate();
 
   const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
@@ -16,6 +16,7 @@ const Register = () => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setSuccess('');
 
     try {
       const response = await fetch(`${API_BASE_URL}/register`, {
@@ -27,25 +28,9 @@ const Register = () => {
       const data = await response.json();
 
       if (response.ok) {
-        // Auto-login after register
-        const formData = new URLSearchParams();
-        formData.append('username', form.email);
-        formData.append('password', form.password);
-
-        const loginRes = await fetch(`${API_BASE_URL}/token`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: formData,
-        });
-        const loginData = await loginRes.json();
-
-        if (loginRes.ok) {
-          saveSession(loginData.access_token, loginData.user);
-          const hasApprovedMembership = loginData.user?.membership?.join_status === 'approved';
-          navigate(hasApprovedMembership ? '/dashboard' : '/groups');
-        } else {
-          navigate('/login');
-        }
+        setSuccess('Account created successfully. Please sign in to continue.');
+        setForm({ name: '', email: '', password: '', phone: '', occupation: '' });
+        window.setTimeout(() => navigate('/login'), 1200);
       } else {
         setError(data.detail || 'Registration failed. Please try again.');
       }
@@ -84,6 +69,11 @@ const Register = () => {
           {error && (
             <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 text-red-700 text-sm font-medium rounded-xl">
               {error}
+            </div>
+          )}
+          {success && (
+            <div className="mb-6 rounded-xl border-l-4 border-emerald-500 bg-emerald-50 p-4 text-sm font-medium text-emerald-700">
+              {success}
             </div>
           )}
 

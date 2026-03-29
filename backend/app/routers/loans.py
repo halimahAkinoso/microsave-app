@@ -70,26 +70,32 @@ def _eligible_savings(db: Session, user_id: int, group_id: int) -> float:
     return sum(row.amount for row in savings_rows)
 
 
+def _open_loan(db: Session, user_id: int, group_id: int, exclude_loan_id: Optional[int] = None) -> Optional[Loan]:
+    query = (
+        db.query(Loan)
+        .filter(
+            Loan.user_id == user_id,
+            Loan.group_id == group_id,
+            Loan.status.in_(("pending", "active", "overdue")),
+        )
+        .order_by(Loan.created_at.desc(), Loan.id.desc())
+    )
+    if exclude_loan_id is not None:
+        query = query.filter(Loan.id != exclude_loan_id)
+    return query.first()
+
+
 def _check_eligibility(loan: Loan, db: Session) -> dict:
     membership = _approved_membership(db, loan.user_id, loan.group_id)
     group = db.query(Group).filter(Group.id == loan.group_id).first()
     total_saved = _eligible_savings(db, loan.user_id, loan.group_id)
     required_savings = loan.amount * 0.5
-    active_loan = (
-        db.query(Loan)
-        .filter(
-            Loan.user_id == loan.user_id,
-            Loan.group_id == loan.group_id,
-            Loan.status == "active",
-            Loan.id != loan.id,
-        )
-        .first()
-    )
+    open_loan = _open_loan(db, loan.user_id, loan.group_id, loan.id)
 
     is_member = membership is not None
     is_admin = bool(membership and membership.role == "admin")
     has_required_savings = total_saved >= required_savings
-    has_active_loan = active_loan is not None
+    has_open_loan = open_loan is not None
     group_has_funds = bool(group and group.balance >= loan.amount)
 
     reasons = []
@@ -101,17 +107,17 @@ def _check_eligibility(loan: Loan, db: Session) -> dict:
         reasons.append(
             f"Insufficient savings history: saved NGN {total_saved:,.0f}, need NGN {required_savings:,.0f}."
         )
-    if has_active_loan:
-        reasons.append("Borrower already has an active loan in this group.")
+    if has_open_loan:
+        reasons.append("Borrower already has an open loan or pending loan request in this group.")
     if not group_has_funds:
         reasons.append("Group balance is not enough to fund this loan.")
 
     return {
-        "eligible": is_member and not is_admin and has_required_savings and not has_active_loan and group_has_funds,
+        "eligible": is_member and not is_admin and has_required_savings and not has_open_loan and group_has_funds,
         "group_balance": group.balance if group else 0.0,
         "total_saved": total_saved,
         "required_savings": required_savings,
-        "has_active_loan": has_active_loan,
+        "has_open_loan": has_open_loan,
         "group_has_funds": group_has_funds,
         "is_approved_member": is_member,
         "is_admin": is_admin,
@@ -214,6 +220,12 @@ def create_loan(
         raise HTTPException(status_code=400, detail="Group admins cannot request loans from their own group.")
     if data.amount <= 0:
         raise HTTPException(status_code=400, detail="Loan amount must be greater than zero.")
+    existing_open_loan = _open_loan(db, current_user.id, data.group_id)
+    if existing_open_loan is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="You already have an open loan or pending loan request in this group.",
+        )
 
     loan = Loan(
         user_id=current_user.id,

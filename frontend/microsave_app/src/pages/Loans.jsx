@@ -161,6 +161,10 @@ const Loans = () => {
 
   const isAdmin = membership?.role === "admin" && membership?.join_status === "approved";
   const isMember = membership?.role === "member" && membership?.join_status === "approved";
+  const hasOpenLoan = useMemo(
+    () => loans.some((loan) => ["pending", "active", "overdue"].includes(loan.status)),
+    [loans]
+  );
 
   const showToast = (message, type = "success") => {
     setToast({ message, type });
@@ -195,12 +199,13 @@ const Loans = () => {
     if (
       membership.role === "member" &&
       membership.join_status === "approved" &&
-      searchParams.get("action") === "request"
+      searchParams.get("action") === "request" &&
+      !hasOpenLoan
     ) {
       setShowRequestModal(true);
       setSearchParams({}, { replace: true });
     }
-  }, [membership, searchParams, setSearchParams]);
+  }, [membership, searchParams, setSearchParams, hasOpenLoan]);
 
   const filteredLoans = useMemo(() => {
     if (filter === "all") {
@@ -279,10 +284,11 @@ const Loans = () => {
             {isMember && (
               <button
                 onClick={() => setShowRequestModal(true)}
-                className="flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600"
+                disabled={hasOpenLoan}
+                className="flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Plus size={16} />
-                Request loan
+                {hasOpenLoan ? "Loan request locked" : "Request loan"}
               </button>
             )}
           </div>
@@ -297,6 +303,12 @@ const Loans = () => {
         {isAdmin && counts.pending > 0 && (
           <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-700">
             {counts.pending} pending loan request{counts.pending > 1 ? "s" : ""} need admin review.
+          </div>
+        )}
+
+        {isMember && hasOpenLoan && (
+          <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-700">
+            You already have an open loan or pending loan request. Complete or resolve it before applying for another loan.
           </div>
         )}
 
@@ -409,7 +421,7 @@ const Loans = () => {
                         <p>Savings: {formatCurrency(eligibility.total_saved)}</p>
                         <p>Minimum savings required: {formatCurrency(eligibility.required_savings)}</p>
                         <p>Group balance: {formatCurrency(eligibility.group_balance)}</p>
-                        <p>Active loan already open: {eligibility.has_active_loan ? "Yes" : "No"}</p>
+                        <p>Open loan or pending request: {eligibility.has_open_loan ? "Yes" : "No"}</p>
                       </div>
                       {!eligibility.eligible && (
                         <p className="mt-3 text-sm font-semibold text-amber-700">{eligibility.message}</p>

@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
-  ArrowRight,
   Banknote,
   CheckCircle,
   CreditCard,
@@ -21,19 +20,19 @@ const PAYMENT_METHODS = [
   {
     value: 'bank_transfer',
     label: 'Bank Transfer',
-    description: 'Redirect to Paystack and complete the wallet top-up with bank transfer.',
+    description: 'Record a wallet top-up through bank transfer.',
     icon: Wallet,
   },
   {
     value: 'card',
     label: 'Debit Card',
-    description: 'Redirect to Paystack and pay with a bank card before the wallet is credited.',
+    description: 'Record a wallet top-up through card payment.',
     icon: CreditCard,
   },
   {
     value: 'ussd',
     label: 'USSD',
-    description: 'Redirect to Paystack and complete the wallet top-up with USSD.',
+    description: 'Record a wallet top-up through USSD.',
     icon: Zap,
   },
 ];
@@ -158,7 +157,7 @@ const ErrorState = ({ message, onRetry }) => (
   </div>
 );
 
-const FundTab = ({ onSuccess, callbackReference, clearCallbackReference }) => {
+const FundTab = ({ onSuccess }) => {
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('bank_transfer');
   const [stage, setStage] = useState('form');
@@ -167,67 +166,25 @@ const FundTab = ({ onSuccess, callbackReference, clearCallbackReference }) => {
   const [settledAmount, setSettledAmount] = useState(null);
   const [settledMethod, setSettledMethod] = useState('bank_transfer');
 
-  useEffect(() => {
-    if (!callbackReference) {
-      return undefined;
-    }
-
-    let active = true;
-
-    const verifyPayment = async () => {
-      setStage('processing');
-      setErrorMessage('');
-      try {
-        const data = await apiFetch(`/wallet/paystack/verify?reference=${encodeURIComponent(callbackReference)}`);
-        if (!active) {
-          return;
-        }
-        setSettledAmount(data.amount_added);
-        setSettledMethod(data.payment_method);
-        setNewBalance(data.new_balance);
-        setStage('success');
-        onSuccess();
-      } catch (error) {
-        if (!active) {
-          return;
-        }
-        setErrorMessage(error.message);
-        setStage('error');
-      } finally {
-        if (active) {
-          clearCallbackReference();
-        }
-      }
-    };
-
-    verifyPayment();
-
-    return () => {
-      active = false;
-    };
-  }, [callbackReference, clearCallbackReference, onSuccess]);
-
   const handleFund = async () => {
     if (!amount || Number(amount) <= 0 || !paymentMethod) return;
     setStage('processing');
     setErrorMessage('');
 
     try {
-      const callbackUrl = `${window.location.origin}/fund-wallet`;
-      const data = await apiFetch('/wallet/paystack/initialize', {
+      const data = await apiFetch('/wallet/fund', {
         method: 'POST',
         body: JSON.stringify({
           amount: Number(amount),
           payment_method: paymentMethod,
-          callback_url: callbackUrl,
+          description: `Wallet top-up via ${paymentMethodLabel(paymentMethod)}`,
         }),
       });
-
-      if (!data.authorization_url) {
-        throw new Error('Paystack did not return an authorization URL.');
-      }
-
-      window.location.assign(data.authorization_url);
+      setSettledAmount(data.amount_added);
+      setSettledMethod(data.payment_method);
+      setNewBalance(data.new_balance);
+      setStage('success');
+      onSuccess();
     } catch (error) {
       setErrorMessage(error.message);
       setStage('error');
@@ -237,8 +194,8 @@ const FundTab = ({ onSuccess, callbackReference, clearCallbackReference }) => {
   if (stage === 'processing') {
     return (
       <Processing
-        title={callbackReference ? 'Verifying payment...' : 'Redirecting to Paystack...'}
-        message={callbackReference ? 'Please wait while we confirm the payment and credit your wallet.' : 'Please complete the checkout on Paystack.'}
+        title="Funding wallet..."
+        message="Please wait while the wallet top-up is being recorded."
       />
     );
   }
@@ -264,12 +221,6 @@ const FundTab = ({ onSuccess, callbackReference, clearCallbackReference }) => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4">
-        <Zap size={18} className="mt-0.5 flex-shrink-0 text-blue-600" />
-        <p className="text-sm font-semibold text-blue-700">
-          Choose a payment method, continue to Paystack checkout, then return here after successful payment to credit the wallet.
-        </p>
-      </div>
       <PaymentMethodPicker selected={paymentMethod} onSelect={setPaymentMethod} />
       <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Selected Method</p>
@@ -282,7 +233,7 @@ const FundTab = ({ onSuccess, callbackReference, clearCallbackReference }) => {
         className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-4 text-lg font-black text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600 disabled:opacity-40"
       >
         <PiggyBank size={20} />
-        Continue to Paystack for {amount ? formatCurrency(amount) : 'wallet funding'}
+        Fund wallet with {amount ? formatCurrency(amount) : 'selected amount'}
       </button>
     </div>
   );
@@ -472,18 +423,10 @@ const FundWallet = () => {
   const [activeTab, setActiveTab] = useState('fund');
   const [wallet, setWallet] = useState(null);
   const preferredType = searchParams.get('type');
-  const callbackReference = searchParams.get('reference') || searchParams.get('trxref');
 
   const loadWallet = async () => {
     const data = await apiFetch('/wallet/me').catch(() => null);
     setWallet(data);
-  };
-
-  const clearCallbackReference = () => {
-    const next = new URLSearchParams(searchParams);
-    next.delete('reference');
-    next.delete('trxref');
-    setSearchParams(next, { replace: true });
   };
 
   useEffect(() => {
@@ -500,19 +443,13 @@ const FundWallet = () => {
     }
   }, [searchParams, setSearchParams]);
 
-  useEffect(() => {
-    if (callbackReference) {
-      setActiveTab('fund');
-    }
-  }, [callbackReference]);
-
   return (
     <DashboardLayout>
       <div className="mx-auto max-w-5xl px-4 py-8 md:px-8">
         <div className="mb-8 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-black text-slate-900">Wallet and Payments</h1>
-            <p className="mt-1 font-medium text-slate-500">Fund your wallet through Paystack, then pay savings or loan repayments from your balance.</p>
+            <p className="mt-1 font-medium text-slate-500">Fund your wallet, then pay savings or loan repayments from your balance.</p>
           </div>
           <button onClick={loadWallet} className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm transition hover:bg-slate-50">
             <RefreshCw size={16} className="text-slate-500" />
@@ -522,28 +459,6 @@ const FundWallet = () => {
         <div className="grid gap-6 lg:grid-cols-5">
           <div className="space-y-4 lg:col-span-2">
             <BalanceCard wallet={wallet} />
-            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-              <p className="mb-4 text-xs font-black uppercase tracking-widest text-slate-500">How It Works</p>
-              <div className="space-y-3">
-                {[
-                  { step: '1', label: 'Choose payment method', desc: 'Select bank transfer, card, or USSD' },
-                  { step: '2', label: 'Complete Paystack checkout', desc: 'Finish the payment securely on Paystack' },
-                  { step: '3', label: 'Wallet gets credited', desc: 'Return here, verify the payment, then spend from wallet balance' },
-                ].map((item) => (
-                  <div key={item.step} className="flex items-start gap-3 rounded-xl border-2 border-transparent p-3 hover:bg-slate-50">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-200 text-xs font-black text-slate-600">{item.step}</span>
-                    <div>
-                      <p className="text-sm font-black text-slate-800">{item.label}</p>
-                      <p className="text-[11px] text-slate-400">{item.desc}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-4">
-                <ArrowRight size={13} className="text-emerald-500" />
-                <p className="text-[11px] font-medium text-slate-400">Only verified Paystack payments increase the wallet balance.</p>
-              </div>
-            </div>
           </div>
 
           <div className="lg:col-span-3">
@@ -568,8 +483,6 @@ const FundWallet = () => {
                 {activeTab === 'fund' ? (
                   <FundTab
                     onSuccess={loadWallet}
-                    callbackReference={callbackReference}
-                    clearCallbackReference={clearCallbackReference}
                   />
                 ) : (
                   <PayTab
