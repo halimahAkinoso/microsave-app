@@ -3,12 +3,10 @@ import { clearSession, getStoredSession } from "../hooks/useAuth";
 const configuredApiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, "");
 const productionApiUrl = "https://microsave-app.onrender.com";
 
-// A Netlify build must never attempt to reach a visitor's localhost. In
-// production, only a secure explicitly configured URL can override Render.
+// A Netlify build must never use a stale deployment variable (such as the old
+// Koyeb URL) or a visitor's localhost. Production always calls Render.
 export const API_BASE_URL = import.meta.env.PROD
-  ? configuredApiUrl?.startsWith("https://")
-    ? configuredApiUrl
-    : productionApiUrl
+  ? productionApiUrl
   : configuredApiUrl || "http://localhost:8000";
 
 export async function apiFetch(path, options = {}) {
