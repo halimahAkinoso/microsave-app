@@ -1,7 +1,10 @@
 import { clearSession, getStoredSession } from "../hooks/useAuth";
 
-export const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:8000";
+const defaultApiUrl = import.meta.env.DEV
+  ? "http://localhost:8000"
+  : "https://microsave-app.onrender.com";
+
+export const API_BASE_URL = import.meta.env.VITE_API_URL || defaultApiUrl;
 
 export async function apiFetch(path, options = {}) {
   const session = getStoredSession();
